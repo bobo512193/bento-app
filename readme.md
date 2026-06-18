@@ -1,0 +1,196 @@
+# 便當訂購 APP
+
+PWA（漸進式網頁應用程式），供員工訂購每日便當。  
+資料完全存於**手機瀏覽器本地（IndexedDB）**，不需雲端資料庫，部署於 GitHub Pages。
+
+---
+
+## 技術選型
+
+| 項目 | 選擇 | 說明 |
+|------|------|------|
+| 框架 | **React + Vite** | 快速建置，生態豐富 |
+| 語言 | **TypeScript** | 型別安全，減少 runtime 錯誤 |
+| 本地儲存 | **Dexie.js（IndexedDB）** | 瀏覽器原生本地資料庫，資料存手機不需雲端 |
+| PWA | **vite-plugin-pwa** | 自動產生 Service Worker、manifest，支援加入主畫面 |
+| UI 元件 | **Tailwind CSS + shadcn/ui** | 快速切版，元件精美 |
+| 狀態管理 | **Zustand** | 輕量，簡單易用 |
+| 路由 | **React Router v6** | SPA 頁面導覽 |
+| 部署 | **GitHub Pages** | 免費靜態托管，push 即自動部署 |
+
+> 使用者在 iOS Safari 開啟網址後，點選「加入主畫面」即可像 APP 一樣使用，資料存於手機瀏覽器 IndexedDB。
+
+---
+
+## 第一步：VS Code 必裝套件
+
+### 必裝（開發核心）
+
+| 套件名稱 | Extension ID | 用途 |
+|----------|--------------|------|
+| ESLint | `dbaeumer.vscode-eslint` | JavaScript/TypeScript 語法檢查 |
+| Prettier | `esbenp.prettier-vscode` | 自動排版程式碼 |
+| TypeScript Importer | `pmneo.tsimporter` | 自動補全 import |
+| Path Intellisense | `christian-kohler.path-intellisense` | 路徑自動補全 |
+| ES7+ React Snippets | `dsznajder.es7-react-js-snippets` | React 快速程式碼片段（`rfc` → 生成元件） |
+
+### 必裝（PWA / 前端專用）
+
+| 套件名稱 | Extension ID | 用途 |
+|----------|--------------|------|
+| Tailwind CSS IntelliSense | `bradlc.vscode-tailwindcss` | Tailwind class 自動補全、預覽色彩 |
+| PostCSS Language Support | `csstools.postcss` | Tailwind 指令語法高亮 |
+
+### 建議裝（提升效率）
+
+| 套件名稱 | Extension ID | 用途 |
+|----------|--------------|------|
+| GitLens | `eamodio.gitlens` | Git 歷史、blame 顯示 |
+| Error Lens | `usernamehw.errorlens` | 錯誤直接顯示在程式碼行上 |
+| Todo Tree | `gruntfuggly.todo-tree` | 整理 TODO / FIXME 標記 |
+| GitHub Actions | `github.vscode-github-actions` | 在 VS Code 內查看 CI/CD 部署狀態 |
+
+### 一鍵安裝指令（在 VS Code 終端機執行）
+
+```bash
+code --install-extension dbaeumer.vscode-eslint
+code --install-extension esbenp.prettier-vscode
+code --install-extension pmneo.tsimporter
+code --install-extension christian-kohler.path-intellisense
+code --install-extension dsznajder.es7-react-js-snippets
+code --install-extension bradlc.vscode-tailwindcss
+code --install-extension csstools.postcss
+code --install-extension eamodio.gitlens
+code --install-extension usernamehw.errorlens
+code --install-extension gruntfuggly.todo-tree
+code --install-extension github.vscode-github-actions
+```
+
+---
+
+## APP 功能規劃
+
+### 1. 店家管理
+- [ ] 新增／編輯／刪除店家
+- [ ] 欄位：名稱、電話、地址、圖片、**啟用狀態**（啟用／停用）
+- [ ] 停用店家不出現在訂單建立的選擇清單中
+
+### 2. 菜單管理
+- [ ] 新增／編輯／刪除品項，**需綁定所屬店家**
+- [ ] 欄位：品項名稱、價格、圖片（無啟用狀態）
+
+### 3. 廠商管理
+- [ ] 新增／編輯／刪除廠商
+- [ ] 欄位：名稱、人數、圖片、**啟用狀態**（啟用／停用）
+- [ ] 停用廠商不出現在訂單建立的選擇清單中
+
+### 4. 人員管理
+- [ ] 新增／編輯／刪除人員，**需綁定所屬廠商**
+- [ ] 欄位：姓名、電話、圖片、**要訂便當**（是／否）
+- [ ] 人員為選配（廠商可不設定人員，改用廠商人數計算）
+- [ ] `要訂便當 = 否` 的人員不列入訂單建立，但仍顯示於人員管理清單中
+
+### 5. 訂單建立
+- [ ] 選擇日期
+- [ ] 選擇廠商（僅顯示啟用中的廠商）
+  - **有設定人員**：列出 `要訂便當 = 是` 的人員，每位人員各自選擇品項與數量
+  - **未設定人員**：以廠商人數為單位，直接選擇品項與數量
+- [ ] 增減數量時，廠商人數／要訂便當人數**僅供參考**，允許多點或少點
+- [ ] 送出前自動比對：**目前點餐總數量** vs **廠商人數 或 要訂便當人數**
+  - 若數量不符，彈出提示：「目前點餐 N 份，與實際人數 M 人不符，是否繼續訂餐？」
+  - 使用者可選擇**繼續送出**或**返回修改**
+- [ ] 建立當日訂單
+
+### 6. 訂單列表
+- [ ] 依日期篩選，由新到舊由上而下顯示
+- [ ] 每筆訂單顯示**狀態標籤**：`未完成` / `已完成`
+- [ ] 每筆訂單展開後顯示兩個維度：
+
+#### 6-1. 依店家檢視
+- 列出各店家的品項總數量、總金額
+- 顯示店家電話按鈕，點擊可直接撥打電話
+
+#### 6-2. 依廠商檢視
+- 列出各廠商向各店家的總金額
+- 列出各廠商的各品項總數量
+- 點擊廠商展開明細：
+  - **廠商有綁定人員**：列出每位人員已點品項、個人總金額、已付款（checkbox 可勾選）
+  - **廠商未綁定人員**：列出所有品項總金額、已付款（checkbox 可勾選）
+
+#### 6-3. 訂單狀態與完成機制
+- 當該日訂單**所有付款項目均已勾選**（is_paid = true），底部出現「**完成訂單**」按鈕
+- 點擊「完成訂單」後，訂單狀態變更為 `已完成`，同時：
+  - 付款 checkbox 全部鎖定，無法再勾選／取消
+  - 訂單內容（品項、數量）無法再編輯
+  - 「完成訂單」按鈕消失，改顯示 `已完成` 標籤
+- `未完成` 狀態下，訂單品項、數量、付款 checkbox 皆可自由編輯
+
+### 7. 訂單管理（資料清除）
+- [ ] 從資料庫讀取**實際有訂單的日期**，以清單列出（無訂單的日期不顯示）
+- [ ] 使用者從清單中勾選要刪除的日期（可多選）
+- [ ] 預覽已勾選的筆數，供使用者確認
+- [ ] 刪除前彈出二次確認對話框，防止誤刪
+- [ ] 確認後刪除所選日期的所有訂單及相關明細（orders、order_items、order_payments）
+- [ ] 顯示目前 IndexedDB 佔用容量（MB），讓使用者判斷是否需要清理
+
+> 注意：此操作僅清除**訂單紀錄**，店家、菜單、廠商、人員等基本資料不受影響。
+
+---
+
+### 資料結構（IndexedDB / Dexie.js）
+
+```
+stores         → id, name, phone, address, image_base64, is_active, created_at
+menus          → id, store_id, name, price, image_base64, created_at
+vendors        → id, name, headcount, image_base64, is_active, created_at
+members        → id, vendor_id, name, phone, image_base64, want_order, created_at
+orders         → id, order_date, status(pending|completed), completed_at(nullable), created_at
+order_items    → id, order_id, store_id, menu_id, vendor_id, member_id(nullable), quantity, unit_price
+order_payments → id, order_id, vendor_id, member_id(nullable), is_paid
+```
+
+**關聯說明**
+- `menus.store_id` → 品項屬於哪間店家
+- `members.vendor_id` → 人員屬於哪間廠商
+- `stores.is_active` / `vendors.is_active` → false 時不出現在訂單建立選單
+- `members.want_order` → false 時不列入訂單建立人員清單
+- `order_items.member_id` 為 NULL 時，代表該廠商未設人員，以廠商為單位計算
+- `order_payments` 記錄每筆廠商（或人員）的付款狀態
+- 圖片以 **Base64** 字串存入 IndexedDB（無需檔案系統）
+
+---
+
+## 部署方式（GitHub Pages）
+
+```
+本機開發 → git push → GitHub Actions 自動執行 vite build → 部署至 gh-pages 分支
+```
+
+1. 建立 GitHub repository
+2. 設定 GitHub Actions workflow（`deploy.yml`）
+3. Repository Settings → Pages → 來源設為 `gh-pages` 分支
+4. 每次 push main 分支，自動重新部署
+
+---
+
+## 環境需求
+
+- Node.js 18+
+- VS Code
+- GitHub 帳號（用於 Pages 部署）
+- iOS Safari：開啟網址後「加入主畫面」即可離線使用
+
+---
+
+## 開發步驟
+
+1. **第一步** ✅ VS Code 套件安裝（本文件）
+2. **第二步** 安裝 Node.js，用 Vite 建立 React + TypeScript 專案
+3. **第三步** 設定 vite-plugin-pwa、Tailwind CSS、Dexie.js
+4. **第四步** 設定 GitHub Actions 自動部署至 GitHub Pages
+5. **第五步** 實作 Dexie.js 資料表 Schema
+6. **第六步** 實作店家管理、菜單管理
+7. **第七步** 實作廠商管理、人員管理
+8. **第八步** 實作訂單建立流程
+9. **第九步** 實作訂單列表（依店家／依廠商檢視、付款 checkbox）
+10. **第十步** 實作訂單管理（日期清單勾選刪除、容量顯示）
