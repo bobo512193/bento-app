@@ -22,6 +22,17 @@ export const orderService = {
       completed_at: null,
     }),
 
+  // 取得當日訂單 id，不存在則建立；已完成回傳 null
+  getOrCreateOrder: async (order_date: string): Promise<number | null> => {
+    const existing = await db.orders.where('order_date').equals(order_date).first()
+    if (existing) {
+      if (existing.status === 'completed') return null
+      return existing.id ?? null
+    }
+    const id = await db.orders.add({ order_date, status: 'pending', completed_at: null })
+    return id ?? null
+  },
+
   complete: async (id: number) => {
     await db.orders.update(id, {
       status: 'completed',
