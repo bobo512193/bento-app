@@ -7,6 +7,10 @@ import StoreListPage from './pages/stores/StoreListPage'
 import StoreFormPage from './pages/stores/StoreFormPage'
 import MenuListPage from './pages/menus/MenuListPage'
 import MenuFormPage from './pages/menus/MenuFormPage'
+import VendorListPage from './pages/vendors/VendorListPage'
+import VendorFormPage from './pages/vendors/VendorFormPage'
+import MemberListPage from './pages/members/MemberListPage'
+import MemberFormPage from './pages/members/MemberFormPage'
 
 function App() {
   return (
@@ -31,6 +35,16 @@ function App() {
           <Route path="management/menus" element={<MenuListPage />} />
           <Route path="management/menus/new" element={<MenuFormPage />} />
           <Route path="management/menus/:id/edit" element={<MenuFormPage />} />
+
+          {/* 廠商管理 */}
+          <Route path="management/vendors" element={<VendorListPage />} />
+          <Route path="management/vendors/new" element={<VendorFormPage />} />
+          <Route path="management/vendors/:id/edit" element={<VendorFormPage />} />
+
+          {/* 人員管理 */}
+          <Route path="management/members" element={<MemberListPage />} />
+          <Route path="management/members/new" element={<MemberFormPage />} />
+          <Route path="management/members/:id/edit" element={<MemberFormPage />} />
         </Route>
       </Routes>
     </BrowserRouter>
