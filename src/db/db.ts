@@ -84,6 +84,9 @@ class BentoDatabase extends Dexie {
       order_items:    '++id, order_id, store_id, menu_id, vendor_id, member_id',
       order_payments: '++id, order_id, vendor_id, member_id',
     })
+    this.version(2).stores({
+      members: '++id, vendor_id, want_order, name',
+    })
   }
 }
 

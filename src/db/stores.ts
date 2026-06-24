@@ -3,7 +3,7 @@ import { db, type Store } from './db'
 export const storeService = {
   getAll: () => db.stores.orderBy('name').toArray(),
 
-  getActive: () => db.stores.where('is_active').equals(1).sortBy('name'),
+  getActive: () => db.stores.orderBy('name').filter(s => s.is_active).toArray(),
 
   getById: (id: number) => db.stores.get(id),
 

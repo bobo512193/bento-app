@@ -3,7 +3,7 @@ import { db, type Vendor } from './db'
 export const vendorService = {
   getAll: () => db.vendors.orderBy('name').toArray(),
 
-  getActive: () => db.vendors.where('is_active').equals(1).sortBy('name'),
+  getActive: () => db.vendors.orderBy('name').filter(v => v.is_active).toArray(),
 
   getById: (id: number) => db.vendors.get(id),
 
