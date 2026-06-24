@@ -15,7 +15,7 @@ import OrderManagementPage from './pages/orders/OrderManagementPage'
 
 function App() {
   return (
-    <BrowserRouter basename="/便當APP">
+    <BrowserRouter basename="/bento-app">
       <Routes>
         <Route path="/" element={<Layout />}>
           <Route index element={<Navigate to="/orders" replace />} />
