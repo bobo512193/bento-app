@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { HashRouter, Routes, Route, Navigate } from 'react-router-dom'
 import Layout from './components/Layout'
 import OrderListPage from './pages/orders/OrderListPage'
 import CreateOrderPage from './pages/orders/CreateOrderPage'
@@ -15,7 +15,7 @@ import OrderManagementPage from './pages/orders/OrderManagementPage'
 
 function App() {
   return (
-    <BrowserRouter basename="/bento-app">
+    <HashRouter>
       <Routes>
         <Route path="/" element={<Layout />}>
           <Route index element={<Navigate to="/orders" replace />} />
@@ -51,7 +51,7 @@ function App() {
           <Route path="order-management" element={<OrderManagementPage />} />
         </Route>
       </Routes>
-    </BrowserRouter>
+    </HashRouter>
   )
 }
 
