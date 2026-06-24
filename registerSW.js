@@ -1,1 +1,1 @@
-if('serviceWorker' in navigator) {window.addEventListener('load', () => {navigator.serviceWorker.register('/%E4%BE%BF%E7%95%B6APP/sw.js', { scope: '/%E4%BE%BF%E7%95%B6APP/' })})}
+if('serviceWorker' in navigator) {window.addEventListener('load', () => {navigator.serviceWorker.register('/bento-app/sw.js', { scope: '/bento-app/' })})}
