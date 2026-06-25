@@ -361,8 +361,12 @@ export default function OrderDetail({ order, maps }: Props) {
                 </button>
               </div>
             )
+          ) : payments.length === 0 ? (
+            <span className="text-xs text-gray-300">請先新增訂單品項</span>
           ) : (
-            <span className="text-xs text-gray-300">依人名全部付款後可完成</span>
+            <span className="text-xs text-orange-300">
+              尚有 {payments.filter(p => !p.is_paid).length} 筆未付（請至依人名勾選）
+            </span>
           )}
 
           {/* 右：編輯訂單 */}
@@ -453,6 +457,9 @@ export default function OrderDetail({ order, maps }: Props) {
                       {sec.isDrink ? '🧋 ' : ''}{sec.storeName}
                     </span>
                     <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-400">
+                        {sec.items.reduce((a, r) => a + r.qty, 0)} {sec.isDrink ? '杯' : '個'}
+                      </span>
                       <span className="text-sm font-semibold text-orange-500">NT$ {sec.storeTotal}</span>
                       {sec.storePhone && (
                         <span className="text-xs text-gray-400">{sec.storePhone}</span>
