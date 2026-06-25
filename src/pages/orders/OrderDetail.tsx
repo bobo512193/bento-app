@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { orderService } from '../../db'
 import type { Order, Store, Menu, Vendor, Member, OrderItem, OrderPayment } from '../../db'
+import QuantityControl from '../../components/QuantityControl'
 
 // ── 型別 ────────────────────────────────────────────────────
 
@@ -16,12 +17,12 @@ type ItemRow = {
   menuName: string
   qty: number
   unitPrice: number
-  toppingExtra: number   // 加料費用/杯
+  toppingExtra: number
   total: number
   sweetness: string | null
   ice: string | null
-  toppingDesc: string | null  // '+椰果 +珍珠'
-  memberName: string | null   // 飲料店家時顯示誰點的
+  toppingDesc: string | null
+  memberName: string | null
 }
 
 type StoreSection = {
@@ -78,7 +79,6 @@ function buildByStore(items: OrderItem[], maps: Maps): StoreSection[] {
     let rows: ItemRow[]
 
     if (isDrink) {
-      // 飲料店：每筆品項獨立顯示，附帶客製化資訊
       rows = storeItems.map(item => {
         const mName = item.member_id != null
           ? (maps.member[item.member_id]?.name ?? '已刪除人員')
@@ -86,7 +86,6 @@ function buildByStore(items: OrderItem[], maps: Maps): StoreSection[] {
         return buildItemRow(item, maps, mName)
       })
     } else {
-      // 便當店：依品項彙總數量
       const byMenu = new Map<number, { qty: number; unitPrice: number }>()
       for (const item of storeItems) {
         const prev = byMenu.get(item.menu_id)
@@ -166,7 +165,7 @@ function buildByVendor(items: OrderItem[], payments: OrderPayment[], maps: Maps)
   })
 }
 
-// ── ItemRow 顯示元件 ──────────────────────────────────────────
+// ── 子元件 ───────────────────────────────────────────────────
 
 function DrinkMeta({ row }: { row: ItemRow }) {
   const parts = [row.sweetness, row.ice, row.toppingDesc].filter(Boolean)
@@ -179,14 +178,45 @@ function DrinkMeta({ row }: { row: ItemRow }) {
   )
 }
 
-// ── 元件 ─────────────────────────────────────────────────────
+function EditItemRow({ item, maps, onQtyChange, onDelete }: {
+  item: OrderItem
+  maps: Maps
+  onQtyChange: (qty: number) => void
+  onDelete: () => void
+}) {
+  const store   = maps.store[item.store_id]
+  const menu    = maps.menu[item.menu_id]
+  const isDrink = (store?.type ?? 'bento') === 'drink'
+  return (
+    <div className="bg-white rounded-xl px-3 py-2.5 border border-gray-100 flex items-center gap-2.5">
+      <div className="text-base shrink-0">{isDrink ? '🧋' : '🍱'}</div>
+      <div className="flex-1 min-w-0">
+        <div className="text-sm text-gray-800 truncate">{menu?.name ?? '已刪除品項'}</div>
+        <div className="text-xs text-gray-400">{store?.name ?? ''}</div>
+      </div>
+      <QuantityControl
+        value={item.quantity}
+        onChange={qty => qty === 0 ? onDelete() : onQtyChange(qty)}
+      />
+      <button
+        onClick={onDelete}
+        className="w-7 h-7 rounded-full bg-red-50 flex items-center justify-center text-red-400 text-lg leading-none shrink-0"
+      >
+        ×
+      </button>
+    </div>
+  )
+}
+
+// ── 主元件 ───────────────────────────────────────────────────
 
 interface Props { order: Order; maps: Maps }
 
 export default function OrderDetail({ order, maps }: Props) {
-  const [activeTab, setActiveTab] = useState<'store' | 'vendor'>('store')
+  const [activeTab, setActiveTab]             = useState<'store' | 'vendor'>('store')
   const [expandedVendorId, setExpandedVendorId] = useState<number | null>(null)
   const [showCompleteConfirm, setShowCompleteConfirm] = useState(false)
+  const [isEditing, setIsEditing]             = useState(false)
 
   const detail = useLiveQuery(async () => {
     const [items, payments] = await Promise.all([
@@ -201,117 +231,127 @@ export default function OrderDetail({ order, maps }: Props) {
   }
 
   const { items, payments } = detail
-  const storeView  = buildByStore(items, maps)
-  const vendorView = buildByVendor(items, payments, maps)
-  const allPaid    = payments.length > 0 && payments.every(p => p.is_paid)
+  const storeView   = buildByStore(items, maps)
+  const vendorView  = buildByVendor(items, payments, maps)
+  const allPaid     = payments.length > 0 && payments.every(p => p.is_paid)
   const isCompleted = order.status === 'completed'
+
+  // ── edit helpers ─────────────────────────────────────────
+  const hasMembersInItems = items.some(i => i.member_id != null)
+  const itemsByMember = new Map<number | null, OrderItem[]>()
+  for (const item of items) {
+    const key = item.member_id ?? null
+    if (!itemsByMember.has(key)) itemsByMember.set(key, [])
+    itemsByMember.get(key)!.push(item)
+  }
+
+  const handleQtyChange = (item: OrderItem, qty: number) => {
+    orderService.updateItem(item.id!, { quantity: qty })
+  }
+  const handleDelete = (item: OrderItem) => {
+    orderService.removeItemAndCleanup(item)
+  }
 
   return (
     <div className="border-t border-gray-100">
-      {/* Tab 列 */}
-      <div className="flex border-b border-gray-200">
-        {(['store', 'vendor'] as const).map(tab => (
+
+      {/* 操作列：編輯按鈕（尚未完成才顯示） */}
+      {!isCompleted && (
+        <div className="flex justify-end px-4 py-2 bg-white border-b border-gray-100">
           <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
-            className={`flex-1 py-2.5 text-sm font-medium transition-colors ${
-              activeTab === tab
-                ? 'text-orange-500 border-b-2 border-orange-500 bg-white'
-                : 'text-gray-500 bg-gray-50'
+            onClick={() => setIsEditing(!isEditing)}
+            className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
+              isEditing
+                ? 'bg-orange-500 text-white border-orange-500'
+                : 'text-orange-400 border-orange-200'
             }`}
           >
-            {tab === 'store' ? '依店家' : '依廠商'}
+            {isEditing ? '完成' : '編輯訂單'}
           </button>
-        ))}
-      </div>
+        </div>
+      )}
 
-      {/* ── 依店家 ──────────────────────────────────────────── */}
-      {activeTab === 'store' && (
-        <div className="p-4 space-y-3">
-          {storeView.map(sec => (
-            <div key={sec.storeId} className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-              <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-100">
-                <span className="text-sm font-semibold text-gray-700">
-                  {sec.isDrink ? '🧋 ' : ''}{sec.storeName}
-                </span>
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-semibold text-orange-500">NT$ {sec.storeTotal}</span>
-                  {sec.storePhone && (
-                    <a
-                      href={`tel:${sec.storePhone}`}
-                      className="w-8 h-8 rounded-full bg-green-500 flex items-center justify-center text-base"
-                    >
-                      📞
-                    </a>
-                  )}
-                </div>
-              </div>
-              <div className="divide-y divide-gray-50">
-                {sec.items.map((row, i) => (
-                  <div key={i} className="px-4 py-2.5">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex-1 min-w-0">
-                        <span className="text-sm text-gray-700">
-                          {row.menuName}
-                          <span className="text-gray-400 ml-1.5">× {row.qty}</span>
-                        </span>
-                        {sec.isDrink && <DrinkMeta row={row} />}
-                        {sec.isDrink && row.memberName && (
-                          <div className="text-xs text-gray-400 mt-0.5">· {row.memberName}</div>
-                        )}
-                      </div>
-                      <span className="text-sm text-gray-600 shrink-0">NT$ {row.total}</span>
-                    </div>
+      {/* ── 編輯模式 ─────────────────────────────────────────── */}
+      {isEditing && (
+        <div className="px-4 py-4 space-y-4">
+          {hasMembersInItems
+            ? Array.from(itemsByMember.entries()).map(([memberId, memberItems]) => (
+                <div key={memberId ?? 'null'}>
+                  <div className="text-xs font-semibold text-gray-400 mb-2 px-1">
+                    {memberId != null
+                      ? (maps.member[memberId]?.name ?? '已刪除人員')
+                      : '廠商訂購'}
                   </div>
+                  <div className="space-y-2">
+                    {memberItems.map(item => (
+                      <EditItemRow
+                        key={item.id}
+                        item={item}
+                        maps={maps}
+                        onQtyChange={qty => handleQtyChange(item, qty)}
+                        onDelete={() => handleDelete(item)}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ))
+            : (
+              <div className="space-y-2">
+                {items.map(item => (
+                  <EditItemRow
+                    key={item.id}
+                    item={item}
+                    maps={maps}
+                    onQtyChange={qty => handleQtyChange(item, qty)}
+                    onDelete={() => handleDelete(item)}
+                  />
                 ))}
               </div>
-            </div>
-          ))}
-          {storeView.length === 0 && (
-            <p className="text-center text-gray-400 py-6 text-sm">尚無品項</p>
+            )
+          }
+          {items.length === 0 && (
+            <p className="text-center text-gray-400 py-4 text-sm">已無品項</p>
           )}
         </div>
       )}
 
-      {/* ── 依廠商 ──────────────────────────────────────────── */}
-      {activeTab === 'vendor' && (
-        <div className="p-4 space-y-3">
-          {vendorView.map(sec => (
-            <div key={sec.vendorId} className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-              {/* 廠商標題 */}
+      {/* ── 一般顯示模式 ──────────────────────────────────────── */}
+      {!isEditing && (
+        <>
+          {/* Tab 列 */}
+          <div className="flex border-b border-gray-200">
+            {(['store', 'vendor'] as const).map(tab => (
               <button
-                onClick={() =>
-                  sec.hasMembers &&
-                  setExpandedVendorId(expandedVendorId === sec.vendorId ? null : sec.vendorId)
-                }
-                className="w-full text-left"
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={`flex-1 py-2.5 text-sm font-medium transition-colors ${
+                  activeTab === tab
+                    ? 'text-orange-500 border-b-2 border-orange-500 bg-white'
+                    : 'text-gray-500 bg-gray-50'
+                }`}
               >
-                <div className="flex items-center justify-between px-4 py-3 bg-gray-50">
-                  <span className="text-sm font-semibold text-gray-700">{sec.vendorName}</span>
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-semibold text-orange-500">NT$ {sec.vendorTotal}</span>
-                    {sec.hasMembers && (
-                      <span className="text-gray-400">
-                        {expandedVendorId === sec.vendorId ? '∨' : '›'}
-                      </span>
-                    )}
-                  </div>
-                </div>
-                {sec.storeBreakdown.length > 1 && (
-                  <div className="flex flex-wrap gap-2 px-4 py-2 border-t border-gray-100 bg-gray-50">
-                    {sec.storeBreakdown.map((s, i) => (
-                      <span key={i} className="text-xs text-gray-500">
-                        {s.storeName} NT${s.total}
-                      </span>
-                    ))}
-                  </div>
-                )}
+                {tab === 'store' ? '依店家' : '依廠商'}
               </button>
+            ))}
+          </div>
 
-              {/* 無人員：品項列表 + 付款 */}
-              {!sec.hasMembers && (
-                <>
-                  <div className="divide-y divide-gray-50 border-t border-gray-100">
+          {/* ── 依店家 ──────────────────────────────────────────── */}
+          {activeTab === 'store' && (
+            <div className="p-4 space-y-3">
+              {storeView.map(sec => (
+                <div key={sec.storeId} className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+                  <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-100">
+                    <span className="text-sm font-semibold text-gray-700">
+                      {sec.isDrink ? '🧋 ' : ''}{sec.storeName}
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-semibold text-orange-500">NT$ {sec.storeTotal}</span>
+                      {sec.storePhone && (
+                        <span className="text-xs text-gray-400">{sec.storePhone}</span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="divide-y divide-gray-50">
                     {sec.items.map((row, i) => (
                       <div key={i} className="px-4 py-2.5">
                         <div className="flex items-start justify-between gap-2">
@@ -320,84 +360,165 @@ export default function OrderDetail({ order, maps }: Props) {
                               {row.menuName}
                               <span className="text-gray-400 ml-1.5">× {row.qty}</span>
                             </span>
-                            {(row.sweetness || row.toppingDesc) && <DrinkMeta row={row} />}
+                            {sec.isDrink && <DrinkMeta row={row} />}
+                            {sec.isDrink && row.memberName && (
+                              <div className="text-xs text-gray-400 mt-0.5">· {row.memberName}</div>
+                            )}
                           </div>
                           <span className="text-sm text-gray-600 shrink-0">NT$ {row.total}</span>
                         </div>
                       </div>
                     ))}
                   </div>
-                  {sec.payment && (
-                    <label className="flex items-center justify-between px-4 py-3 border-t border-gray-100 cursor-pointer">
-                      <span className={`text-sm ${sec.payment.is_paid ? 'text-green-600 font-medium' : 'text-gray-600'}`}>
-                        {sec.payment.is_paid ? '✓ 已付款' : '未付款'}
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={sec.payment.is_paid}
-                        disabled={isCompleted}
-                        onChange={() => orderService.togglePayment(sec.payment!.id!)}
-                        className="w-5 h-5 accent-orange-500"
-                      />
-                    </label>
-                  )}
-                </>
+                </div>
+              ))}
+              {storeView.length === 0 && (
+                <p className="text-center text-gray-400 py-6 text-sm">尚無品項</p>
               )}
+            </div>
+          )}
 
-              {/* 有人員：展開後顯示每位人員 */}
-              {sec.hasMembers && expandedVendorId === sec.vendorId && (
-                <div className="divide-y divide-gray-100 border-t border-gray-100">
-                  {sec.members.map(member => (
-                    <div key={member.memberId} className="px-4 py-3">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-sm font-medium text-gray-700">{member.memberName}</span>
-                        <div className="flex items-center gap-3">
-                          <span className="text-sm font-semibold text-orange-500">NT$ {member.memberTotal}</span>
-                          {member.payment && (
-                            <label className="flex items-center gap-1.5 cursor-pointer">
-                              <span className={`text-xs ${member.payment.is_paid ? 'text-green-600 font-medium' : 'text-gray-400'}`}>
-                                {member.payment.is_paid ? '已付' : '未付'}
-                              </span>
-                              <input
-                                type="checkbox"
-                                checked={member.payment.is_paid}
-                                disabled={isCompleted}
-                                onChange={() => orderService.togglePayment(member.payment!.id!)}
-                                className="w-5 h-5 accent-orange-500"
-                              />
-                            </label>
-                          )}
-                        </div>
+          {/* ── 依廠商 ──────────────────────────────────────────── */}
+          {activeTab === 'vendor' && (
+            <div className="p-4 space-y-3">
+              {vendorView.map(sec => (
+                <div key={sec.vendorId} className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+                  {/* 廠商標題 */}
+                  <button
+                    onClick={() =>
+                      sec.hasMembers &&
+                      setExpandedVendorId(expandedVendorId === sec.vendorId ? null : sec.vendorId)
+                    }
+                    className="w-full text-left"
+                  >
+                    <div className="flex items-center justify-between px-4 py-3 bg-gray-50">
+                      <span className="text-sm font-semibold text-gray-700">{sec.vendorName}</span>
+                      <div className="flex items-center gap-2">
+                        {/* 有人員時在標題顯示付款進度 */}
+                        {sec.hasMembers && (() => {
+                          const paid  = sec.members.filter(m => m.payment?.is_paid).length
+                          const total = sec.members.length
+                          return (
+                            <span className={`text-xs px-2 py-0.5 rounded-full ${
+                              paid === total
+                                ? 'bg-green-100 text-green-600'
+                                : 'bg-gray-100 text-gray-500'
+                            }`}>
+                              {paid}/{total} 已付
+                            </span>
+                          )
+                        })()}
+                        <span className="text-sm font-semibold text-orange-500">NT$ {sec.vendorTotal}</span>
+                        {sec.hasMembers && (
+                          <span className="text-gray-400 text-sm">
+                            {expandedVendorId === sec.vendorId ? '∨' : '›'}
+                          </span>
+                        )}
                       </div>
-                      <div className="space-y-1">
-                        {member.items.map((row, i) => (
-                          <div key={i}>
-                            <div className="flex justify-between">
-                              <span className="text-xs text-gray-400">{row.menuName} × {row.qty}</span>
-                              <span className="text-xs text-gray-400">NT$ {row.total}</span>
-                            </div>
-                            {(row.sweetness || row.toppingDesc) && (
-                              <div className="text-xs text-blue-400 mt-0.5 ml-2">
-                                {[row.sweetness, row.ice, row.toppingDesc].filter(Boolean).join(' ')}
+                    </div>
+                    {sec.storeBreakdown.length > 1 && (
+                      <div className="flex flex-wrap gap-2 px-4 py-2 border-t border-gray-100 bg-gray-50">
+                        {sec.storeBreakdown.map((s, i) => (
+                          <span key={i} className="text-xs text-gray-500">
+                            {s.storeName} NT${s.total}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </button>
+
+                  {/* 無人員：品項列表 + 付款 */}
+                  {!sec.hasMembers && (
+                    <>
+                      <div className="divide-y divide-gray-50 border-t border-gray-100">
+                        {sec.items.map((row, i) => (
+                          <div key={i} className="px-4 py-2.5">
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="flex-1 min-w-0">
+                                <span className="text-sm text-gray-700">
+                                  {row.menuName}
+                                  <span className="text-gray-400 ml-1.5">× {row.qty}</span>
+                                </span>
+                                {(row.sweetness || row.toppingDesc) && <DrinkMeta row={row} />}
                               </div>
-                            )}
+                              <span className="text-sm text-gray-600 shrink-0">NT$ {row.total}</span>
+                            </div>
                           </div>
                         ))}
                       </div>
+                      {sec.payment && (
+                        <label className="flex items-center justify-between px-4 py-3 border-t border-gray-100 cursor-pointer">
+                          <span className={`text-sm ${sec.payment.is_paid ? 'text-green-600 font-medium' : 'text-gray-600'}`}>
+                            {sec.payment.is_paid ? '✓ 已付款' : '未付款'}
+                          </span>
+                          <input
+                            type="checkbox"
+                            checked={sec.payment.is_paid}
+                            disabled={isCompleted}
+                            onChange={() => orderService.togglePayment(sec.payment!.id!)}
+                            className="w-5 h-5 accent-orange-500"
+                          />
+                        </label>
+                      )}
+                    </>
+                  )}
+
+                  {/* 有人員：展開後顯示每位人員 */}
+                  {sec.hasMembers && expandedVendorId === sec.vendorId && (
+                    <div className="divide-y divide-gray-100 border-t border-gray-100">
+                      {sec.members.map(member => (
+                        <div key={member.memberId} className="px-4 py-3">
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-sm font-medium text-gray-700">{member.memberName}</span>
+                            <div className="flex items-center gap-3">
+                              <span className="text-sm font-semibold text-orange-500">NT$ {member.memberTotal}</span>
+                              {member.payment && (
+                                <label className="flex items-center gap-1.5 cursor-pointer">
+                                  <span className={`text-xs ${member.payment.is_paid ? 'text-green-600 font-medium' : 'text-gray-400'}`}>
+                                    {member.payment.is_paid ? '已付' : '未付'}
+                                  </span>
+                                  <input
+                                    type="checkbox"
+                                    checked={member.payment.is_paid}
+                                    disabled={isCompleted}
+                                    onChange={() => orderService.togglePayment(member.payment!.id!)}
+                                    className="w-5 h-5 accent-orange-500"
+                                  />
+                                </label>
+                              )}
+                            </div>
+                          </div>
+                          <div className="space-y-1">
+                            {member.items.map((row, i) => (
+                              <div key={i}>
+                                <div className="flex justify-between">
+                                  <span className="text-xs text-gray-400">{row.menuName} × {row.qty}</span>
+                                  <span className="text-xs text-gray-400">NT$ {row.total}</span>
+                                </div>
+                                {(row.sweetness || row.toppingDesc) && (
+                                  <div className="text-xs text-blue-400 mt-0.5 ml-2">
+                                    {[row.sweetness, row.ice, row.toppingDesc].filter(Boolean).join(' ')}
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  )}
                 </div>
+              ))}
+              {vendorView.length === 0 && (
+                <p className="text-center text-gray-400 py-6 text-sm">尚無品項</p>
               )}
             </div>
-          ))}
-          {vendorView.length === 0 && (
-            <p className="text-center text-gray-400 py-6 text-sm">尚無品項</p>
           )}
-        </div>
+        </>
       )}
 
       {/* 完成訂單按鈕 */}
-      {!isCompleted && allPaid && (
+      {!isCompleted && !isEditing && allPaid && (
         <div className="px-4 pb-4">
           {!showCompleteConfirm ? (
             <button

@@ -52,6 +52,20 @@ export const orderService = {
 
   removeItem: (id: number) => db.order_items.delete(id),
 
+  removeItemAndCleanup: async (item: OrderItem) => {
+    await db.order_items.delete(item.id!)
+    const remaining = await db.order_items
+      .where('order_id').equals(item.order_id)
+      .filter(i => i.vendor_id === item.vendor_id && i.member_id === item.member_id)
+      .count()
+    if (remaining === 0) {
+      await db.order_payments
+        .where('order_id').equals(item.order_id)
+        .filter(p => p.vendor_id === item.vendor_id && p.member_id === item.member_id)
+        .delete()
+    }
+  },
+
   // ── 付款狀態 ─────────────────────────────────────────────
 
   getPayments: (order_id: number) =>
