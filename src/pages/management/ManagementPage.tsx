@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
 import PageHeader from '../../components/PageHeader'
+import { APP_VERSION } from '../../version'
 
 const items = [
   { to: '/management/stores', icon: '🏪', label: '店家管理' },
@@ -25,6 +26,7 @@ export default function ManagementPage() {
           </Link>
         ))}
       </div>
+      <p className="text-center text-xs text-gray-300 pt-2 pb-6">Ver {APP_VERSION}</p>
     </div>
   )
 }
