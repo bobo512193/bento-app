@@ -9,7 +9,9 @@ export default function UpdateBanner() {
     updateServiceWorker,
   } = useRegisterSW({
     onRegisteredSW(_swUrl, registration) {
-      registration && setInterval(() => registration.update(), 30 * 60 * 1000)
+      if (registration) {
+        setInterval(() => registration.update(), 30 * 60 * 1000)
+      }
     },
   })
 
