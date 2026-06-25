@@ -5,6 +5,8 @@ import CreateOrderPage from './pages/orders/CreateOrderPage'
 import ManagementPage from './pages/management/ManagementPage'
 import StoreListPage from './pages/stores/StoreListPage'
 import StoreFormPage from './pages/stores/StoreFormPage'
+import ToppingListPage from './pages/stores/ToppingListPage'
+import ToppingFormPage from './pages/stores/ToppingFormPage'
 import MenuListPage from './pages/menus/MenuListPage'
 import MenuFormPage from './pages/menus/MenuFormPage'
 import VendorListPage from './pages/vendors/VendorListPage'
@@ -31,6 +33,11 @@ function App() {
           <Route path="management/stores" element={<StoreListPage />} />
           <Route path="management/stores/new" element={<StoreFormPage />} />
           <Route path="management/stores/:id/edit" element={<StoreFormPage />} />
+
+          {/* 加料管理（飲料店家） */}
+          <Route path="management/stores/:id/toppings" element={<ToppingListPage />} />
+          <Route path="management/stores/:id/toppings/new" element={<ToppingFormPage />} />
+          <Route path="management/stores/:id/toppings/:tid/edit" element={<ToppingFormPage />} />
 
           {/* 菜單管理 */}
           <Route path="management/menus" element={<MenuListPage />} />

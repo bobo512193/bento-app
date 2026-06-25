@@ -14,8 +14,8 @@ export const storeService = {
     db.stores.update(id, data),
 
   remove: async (id: number) => {
-    // 刪除店家時，連同旗下菜單一起刪除
     await db.menus.where('store_id').equals(id).delete()
+    await db.toppings.where('store_id').equals(id).delete()
     await db.stores.delete(id)
   },
 

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, Link } from 'react-router-dom'
 import { storeService } from '../../db'
 import PageHeader from '../../components/PageHeader'
 import ImagePicker from '../../components/ImagePicker'
@@ -10,11 +10,12 @@ export default function StoreFormPage() {
   const navigate = useNavigate()
   const isEdit = !!id
 
-  const [name, setName] = useState('')
-  const [phone, setPhone] = useState('')
-  const [address, setAddress] = useState('')
-  const [image_base64, setImage] = useState('')
-  const [is_active, setActive] = useState(true)
+  const [name,         setName]    = useState('')
+  const [phone,        setPhone]   = useState('')
+  const [address,      setAddress] = useState('')
+  const [image_base64, setImage]   = useState('')
+  const [is_active,    setActive]  = useState(true)
+  const [type,         setType]    = useState<'bento' | 'drink'>('bento')
   const [showConfirmDelete, setShowConfirmDelete] = useState(false)
   const [nameError, setNameError] = useState(false)
 
@@ -27,15 +28,13 @@ export default function StoreFormPage() {
       setAddress(store.address)
       setImage(store.image_base64)
       setActive(store.is_active)
+      setType(store.type ?? 'bento')
     })
   }, [id, isEdit])
 
   const handleSave = async () => {
-    if (!name.trim()) {
-      setNameError(true)
-      return
-    }
-    const data = { name: name.trim(), phone, address, image_base64, is_active }
+    if (!name.trim()) { setNameError(true); return }
+    const data = { name: name.trim(), phone, address, image_base64, is_active, type }
     if (isEdit) {
       await storeService.update(Number(id), data)
     } else {
@@ -74,6 +73,35 @@ export default function StoreFormPage() {
           {nameError && <p className="text-xs text-red-500 mt-1">請輸入店家名稱</p>}
         </div>
 
+        {/* 店家類型 */}
+        <div>
+          <label className="text-sm text-gray-600 mb-2 block">類型</label>
+          <div className="flex rounded-lg overflow-hidden border border-gray-200">
+            <button
+              type="button"
+              onClick={() => setType('bento')}
+              className={`flex-1 py-2.5 text-sm font-medium transition-colors ${
+                type === 'bento'
+                  ? 'bg-orange-500 text-white'
+                  : 'bg-white text-gray-500'
+              }`}
+            >
+              🍱 便當
+            </button>
+            <button
+              type="button"
+              onClick={() => setType('drink')}
+              className={`flex-1 py-2.5 text-sm font-medium transition-colors border-l border-gray-200 ${
+                type === 'drink'
+                  ? 'bg-orange-500 text-white'
+                  : 'bg-white text-gray-500'
+              }`}
+            >
+              🧋 飲料
+            </button>
+          </div>
+        </div>
+
         <div>
           <label className="text-sm text-gray-600 mb-1 block">電話</label>
           <input
@@ -100,6 +128,17 @@ export default function StoreFormPage() {
           <Toggle value={is_active} onChange={setActive} />
         </div>
 
+        {/* 飲料店家：加料管理入口 */}
+        {isEdit && type === 'drink' && (
+          <Link
+            to={`/management/stores/${id}/toppings`}
+            className="flex items-center justify-between w-full py-3 px-4 bg-blue-50 rounded-xl border border-blue-100 text-sm text-blue-600"
+          >
+            <span>🧋 管理加料選項</span>
+            <span className="text-blue-300">›</span>
+          </Link>
+        )}
+
         {isEdit && (
           <div className="pt-2 border-t border-gray-100 space-y-2">
             {!showConfirmDelete ? (
@@ -125,7 +164,7 @@ export default function StoreFormPage() {
                 </button>
               </div>
             )}
-            <p className="text-xs text-gray-400 text-center">刪除店家將同時刪除所有相關菜單</p>
+            <p className="text-xs text-gray-400 text-center">刪除店家將同時刪除所有相關菜單與加料</p>
           </div>
         )}
       </div>

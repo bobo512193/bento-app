@@ -1,6 +1,10 @@
 import Dexie, { type EntityTable } from 'dexie'
 
-// ── 型別定義 ──────────────────────────────────────────────
+// ── 常數 ──────────────────────────────────────────────────────
+export const SWEETNESS_OPTIONS = ['無糖', '一分糖', '微糖', '半糖', '全糖'] as const
+export const ICE_OPTIONS = ['去冰', '微冰', '少冰', '正常冰'] as const
+
+// ── 型別定義 ──────────────────────────────────────────────────
 
 export interface Store {
   id?: number
@@ -9,6 +13,14 @@ export interface Store {
   address: string
   image_base64: string
   is_active: boolean
+  type: 'bento' | 'drink'
+}
+
+export interface Topping {
+  id?: number
+  store_id: number
+  name: string
+  price: number
 }
 
 export interface Menu {
@@ -38,9 +50,9 @@ export interface Member {
 
 export interface Order {
   id?: number
-  order_date: string            // 'YYYY-MM-DD'
+  order_date: string
   status: 'pending' | 'completed'
-  completed_at: number | null   // 完成時的 Unix 時間戳（毫秒），用於顯示完成時間
+  completed_at: number | null
 }
 
 export interface OrderItem {
@@ -49,23 +61,27 @@ export interface OrderItem {
   store_id: number
   menu_id: number
   vendor_id: number
-  member_id: number | null      // null = 廠商未設人員，以廠商為單位
+  member_id: number | null
   quantity: number
   unit_price: number
+  sweetness: string | null
+  ice: string | null
+  toppings: Array<{ topping_id: number; name: string; price: number }> | null
 }
 
 export interface OrderPayment {
   id?: number
   order_id: number
   vendor_id: number
-  member_id: number | null      // null = 廠商整體付款
+  member_id: number | null
   is_paid: boolean
 }
 
-// ── Dexie 資料庫 ──────────────────────────────────────────
+// ── Dexie 資料庫 ──────────────────────────────────────────────
 
 class BentoDatabase extends Dexie {
   stores!: EntityTable<Store, 'id'>
+  toppings!: EntityTable<Topping, 'id'>
   menus!: EntityTable<Menu, 'id'>
   vendors!: EntityTable<Vendor, 'id'>
   members!: EntityTable<Member, 'id'>
@@ -86,6 +102,10 @@ class BentoDatabase extends Dexie {
     })
     this.version(2).stores({
       members: '++id, vendor_id, want_order, name',
+    })
+    this.version(3).stores({
+      stores:   '++id, name, is_active, type',
+      toppings: '++id, store_id, name',
     })
   }
 }

@@ -12,16 +12,32 @@ export type Maps = {
   member: Record<number, Member>
 }
 
-type ItemRow = { menuName: string; qty: number; unitPrice: number; total: number }
+type ItemRow = {
+  menuName: string
+  qty: number
+  unitPrice: number
+  toppingExtra: number   // 加料費用/杯
+  total: number
+  sweetness: string | null
+  ice: string | null
+  toppingDesc: string | null  // '+椰果 +珍珠'
+  memberName: string | null   // 飲料店家時顯示誰點的
+}
 
 type StoreSection = {
-  storeId: number; storeName: string; storePhone: string
-  items: ItemRow[]; storeTotal: number
+  storeId: number
+  storeName: string
+  storePhone: string
+  isDrink: boolean
+  items: ItemRow[]
+  storeTotal: number
 }
 
 type MemberSection = {
-  memberId: number; memberName: string
-  items: ItemRow[]; memberTotal: number
+  memberId: number
+  memberName: string
+  items: ItemRow[]
+  memberTotal: number
   payment: OrderPayment | undefined
 }
 
@@ -31,26 +47,64 @@ type VendorSection =
 
 // ── 聚合函數 ─────────────────────────────────────────────────
 
+function buildItemRow(item: OrderItem, maps: Maps, memberName: string | null = null): ItemRow {
+  const toppingExtra = item.toppings?.reduce((a, t) => a + t.price, 0) ?? 0
+  return {
+    menuName: maps.menu[item.menu_id]?.name ?? '已刪除品項',
+    qty: item.quantity,
+    unitPrice: item.unit_price,
+    toppingExtra,
+    total: (item.unit_price + toppingExtra) * item.quantity,
+    sweetness: item.sweetness ?? null,
+    ice: item.ice ?? null,
+    toppingDesc: item.toppings?.length
+      ? item.toppings.map(t => `+${t.name}`).join(' ')
+      : null,
+    memberName,
+  }
+}
+
 function buildByStore(items: OrderItem[], maps: Maps): StoreSection[] {
   const byStore = new Map<number, OrderItem[]>()
   for (const item of items) {
     if (!byStore.has(item.store_id)) byStore.set(item.store_id, [])
     byStore.get(item.store_id)!.push(item)
   }
+
   return Array.from(byStore.entries()).map(([storeId, storeItems]) => {
-    const byMenu = new Map<number, { qty: number; unitPrice: number }>()
-    for (const item of storeItems) {
-      const prev = byMenu.get(item.menu_id)
-      byMenu.set(item.menu_id, { qty: (prev?.qty ?? 0) + item.quantity, unitPrice: item.unit_price })
+    const store   = maps.store[storeId]
+    const isDrink = (store?.type ?? 'bento') === 'drink'
+
+    let rows: ItemRow[]
+
+    if (isDrink) {
+      // 飲料店：每筆品項獨立顯示，附帶客製化資訊
+      rows = storeItems.map(item => {
+        const mName = item.member_id != null
+          ? (maps.member[item.member_id]?.name ?? '已刪除人員')
+          : null
+        return buildItemRow(item, maps, mName)
+      })
+    } else {
+      // 便當店：依品項彙總數量
+      const byMenu = new Map<number, { qty: number; unitPrice: number }>()
+      for (const item of storeItems) {
+        const prev = byMenu.get(item.menu_id)
+        byMenu.set(item.menu_id, { qty: (prev?.qty ?? 0) + item.quantity, unitPrice: item.unit_price })
+      }
+      rows = Array.from(byMenu.entries()).map(([menuId, { qty, unitPrice }]) => ({
+        menuName: maps.menu[menuId]?.name ?? '已刪除品項',
+        qty, unitPrice, toppingExtra: 0,
+        total: qty * unitPrice,
+        sweetness: null, ice: null, toppingDesc: null, memberName: null,
+      }))
     }
-    const rows: ItemRow[] = Array.from(byMenu.entries()).map(([menuId, { qty, unitPrice }]) => ({
-      menuName: maps.menu[menuId]?.name ?? '已刪除品項',
-      qty, unitPrice, total: qty * unitPrice,
-    }))
+
     return {
       storeId,
-      storeName: maps.store[storeId]?.name ?? '已刪除店家',
-      storePhone: maps.store[storeId]?.phone ?? '',
+      storeName: store?.name ?? '已刪除店家',
+      storePhone: store?.phone ?? '',
+      isDrink,
       items: rows,
       storeTotal: rows.reduce((a, r) => a + r.total, 0),
     }
@@ -65,10 +119,10 @@ function buildByVendor(items: OrderItem[], payments: OrderPayment[], maps: Maps)
   }
 
   return Array.from(byVendor.entries()).map(([vendorId, vendorItems]) => {
-    // 依店家小計
     const storeMap = new Map<number, number>()
     for (const item of vendorItems) {
-      storeMap.set(item.store_id, (storeMap.get(item.store_id) ?? 0) + item.quantity * item.unit_price)
+      const extra = item.toppings?.reduce((a, t) => a + t.price, 0) ?? 0
+      storeMap.set(item.store_id, (storeMap.get(item.store_id) ?? 0) + (item.unit_price + extra) * item.quantity)
     }
     const storeBreakdown = Array.from(storeMap.entries()).map(([sid, total]) => ({
       storeName: maps.store[sid]?.name ?? '已刪除店家', total,
@@ -84,10 +138,7 @@ function buildByVendor(items: OrderItem[], payments: OrderPayment[], maps: Maps)
         byMember.get(item.member_id)!.push(item)
       }
       const members: MemberSection[] = Array.from(byMember.entries()).map(([memberId, mItems]) => {
-        const rows: ItemRow[] = mItems.map(item => ({
-          menuName: maps.menu[item.menu_id]?.name ?? '已刪除品項',
-          qty: item.quantity, unitPrice: item.unit_price, total: item.quantity * item.unit_price,
-        }))
+        const rows = mItems.map(item => buildItemRow(item, maps))
         return {
           memberId,
           memberName: maps.member[memberId]?.name ?? '已刪除人員',
@@ -103,15 +154,7 @@ function buildByVendor(items: OrderItem[], payments: OrderPayment[], maps: Maps)
         storeBreakdown, members,
       }
     } else {
-      const byMenu = new Map<number, { qty: number; unitPrice: number }>()
-      for (const item of vendorItems) {
-        const prev = byMenu.get(item.menu_id)
-        byMenu.set(item.menu_id, { qty: (prev?.qty ?? 0) + item.quantity, unitPrice: item.unit_price })
-      }
-      const rows: ItemRow[] = Array.from(byMenu.entries()).map(([menuId, { qty, unitPrice }]) => ({
-        menuName: maps.menu[menuId]?.name ?? '已刪除品項',
-        qty, unitPrice, total: qty * unitPrice,
-      }))
+      const rows = vendorItems.map(item => buildItemRow(item, maps))
       return {
         hasMembers: false as const, vendorId,
         vendorName: maps.vendor[vendorId]?.name ?? '已刪除廠商',
@@ -121,6 +164,19 @@ function buildByVendor(items: OrderItem[], payments: OrderPayment[], maps: Maps)
       }
     }
   })
+}
+
+// ── ItemRow 顯示元件 ──────────────────────────────────────────
+
+function DrinkMeta({ row }: { row: ItemRow }) {
+  const parts = [row.sweetness, row.ice, row.toppingDesc].filter(Boolean)
+  if (!parts.length) return null
+  return (
+    <div className="text-xs text-blue-500 mt-0.5">
+      {parts.join(' ')}
+      {row.toppingExtra > 0 && <span className="text-gray-400"> (加料 +{row.toppingExtra})</span>}
+    </div>
+  )
 }
 
 // ── 元件 ─────────────────────────────────────────────────────
@@ -175,7 +231,9 @@ export default function OrderDetail({ order, maps }: Props) {
           {storeView.map(sec => (
             <div key={sec.storeId} className="bg-white rounded-xl border border-gray-100 overflow-hidden">
               <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-100">
-                <span className="text-sm font-semibold text-gray-700">{sec.storeName}</span>
+                <span className="text-sm font-semibold text-gray-700">
+                  {sec.isDrink ? '🧋 ' : ''}{sec.storeName}
+                </span>
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-semibold text-orange-500">NT$ {sec.storeTotal}</span>
                   {sec.storePhone && (
@@ -190,12 +248,20 @@ export default function OrderDetail({ order, maps }: Props) {
               </div>
               <div className="divide-y divide-gray-50">
                 {sec.items.map((row, i) => (
-                  <div key={i} className="flex items-center justify-between px-4 py-2.5">
-                    <span className="text-sm text-gray-700">
-                      {row.menuName}
-                      <span className="text-gray-400 ml-1.5">× {row.qty}</span>
-                    </span>
-                    <span className="text-sm text-gray-600">NT$ {row.total}</span>
+                  <div key={i} className="px-4 py-2.5">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <span className="text-sm text-gray-700">
+                          {row.menuName}
+                          <span className="text-gray-400 ml-1.5">× {row.qty}</span>
+                        </span>
+                        {sec.isDrink && <DrinkMeta row={row} />}
+                        {sec.isDrink && row.memberName && (
+                          <div className="text-xs text-gray-400 mt-0.5">· {row.memberName}</div>
+                        )}
+                      </div>
+                      <span className="text-sm text-gray-600 shrink-0">NT$ {row.total}</span>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -231,7 +297,6 @@ export default function OrderDetail({ order, maps }: Props) {
                     )}
                   </div>
                 </div>
-                {/* 依店家小計 */}
                 {sec.storeBreakdown.length > 1 && (
                   <div className="flex flex-wrap gap-2 px-4 py-2 border-t border-gray-100 bg-gray-50">
                     {sec.storeBreakdown.map((s, i) => (
@@ -248,12 +313,17 @@ export default function OrderDetail({ order, maps }: Props) {
                 <>
                   <div className="divide-y divide-gray-50 border-t border-gray-100">
                     {sec.items.map((row, i) => (
-                      <div key={i} className="flex items-center justify-between px-4 py-2.5">
-                        <span className="text-sm text-gray-700">
-                          {row.menuName}
-                          <span className="text-gray-400 ml-1.5">× {row.qty}</span>
-                        </span>
-                        <span className="text-sm text-gray-600">NT$ {row.total}</span>
+                      <div key={i} className="px-4 py-2.5">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <span className="text-sm text-gray-700">
+                              {row.menuName}
+                              <span className="text-gray-400 ml-1.5">× {row.qty}</span>
+                            </span>
+                            {(row.sweetness || row.toppingDesc) && <DrinkMeta row={row} />}
+                          </div>
+                          <span className="text-sm text-gray-600 shrink-0">NT$ {row.total}</span>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -301,9 +371,16 @@ export default function OrderDetail({ order, maps }: Props) {
                       </div>
                       <div className="space-y-1">
                         {member.items.map((row, i) => (
-                          <div key={i} className="flex justify-between">
-                            <span className="text-xs text-gray-400">{row.menuName} × {row.qty}</span>
-                            <span className="text-xs text-gray-400">NT$ {row.total}</span>
+                          <div key={i}>
+                            <div className="flex justify-between">
+                              <span className="text-xs text-gray-400">{row.menuName} × {row.qty}</span>
+                              <span className="text-xs text-gray-400">NT$ {row.total}</span>
+                            </div>
+                            {(row.sweetness || row.toppingDesc) && (
+                              <div className="text-xs text-blue-400 mt-0.5 ml-2">
+                                {[row.sweetness, row.ice, row.toppingDesc].filter(Boolean).join(' ')}
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>
