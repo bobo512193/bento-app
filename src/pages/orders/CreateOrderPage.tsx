@@ -12,9 +12,9 @@ type StoreWithMenus = Store & { menus: Menu[] }
 
 type ItemState = {
   qty: number
-  sweetness: string    // 飲料甜度，預設半糖
-  ice: string          // 飲料冰塊，預設少冰
-  toppingIds: number[] // 選取的加料 id
+  sweetness: string
+  ice: string
+  toppingIds: number[]
 }
 
 function defaultItemState(): ItemState {
@@ -38,11 +38,10 @@ export default function CreateOrderPage() {
   const [vendor, setVendor] = useState<Vendor | null>(null)
   const [members, setMembers] = useState<Member[]>([])
   const [stores,  setStores]  = useState<StoreWithMenus[]>([])
-  const [activeMemberId, setActiveMemberId] = useState<number | null>(null)
 
   // memberOrders[memberId][menuId] = ItemState
   const [memberOrders, setMemberOrders] = useState<Record<number, Record<number, ItemState>>>({})
-  // vendorOrders[menuId] = ItemState
+  // vendorOrders[menuId] = ItemState (no members)
   const [vendorOrders, setVendorOrders] = useState<Record<number, ItemState>>({})
   // storeToppings[storeId] = Topping[]
   const [storeToppings, setStoreToppings] = useState<Record<number, Topping[]>>({})
@@ -74,16 +73,13 @@ export default function CreateOrderPage() {
       )
     ).filter(s => s.menus.length > 0)
 
-    // 飲料店家載入加料
     const drinkStores = storesWithMenus.filter(s => (s.type ?? 'bento') === 'drink')
     const toppingsEntries = await Promise.all(
       drinkStores.map(async s => [s.id!, await toppingService.getByStore(s.id!)] as const)
     )
     setStoreToppings(Object.fromEntries(toppingsEntries))
-
     setMembers(activeMembers)
     setStores(storesWithMenus)
-    setActiveMemberId(activeMembers[0]?.id ?? null)
     setStep('items')
   }
 
@@ -106,16 +102,12 @@ export default function CreateOrderPage() {
     }
   }
 
-  const setQty = (menuId: number, qty: number, memberId?: number) => {
+  const setQty       = (menuId: number, qty: number, memberId?: number) =>
     updateItemState(menuId, { ...getItemState(menuId, memberId), qty: Math.max(0, qty) }, memberId)
-  }
-
   const setSweetness = (menuId: number, val: string, memberId?: number) =>
     updateItemState(menuId, { ...getItemState(menuId, memberId), sweetness: val }, memberId)
-
-  const setIce = (menuId: number, val: string, memberId?: number) =>
+  const setIce       = (menuId: number, val: string, memberId?: number) =>
     updateItemState(menuId, { ...getItemState(menuId, memberId), ice: val }, memberId)
-
   const toggleTopping = (menuId: number, toppingId: number, memberId?: number) => {
     const cur = getItemState(menuId, memberId)
     const ids = cur.toppingIds.includes(toppingId)
@@ -133,9 +125,6 @@ export default function CreateOrderPage() {
 
   const referenceCount = (): number =>
     members.length > 0 ? members.length : (vendor?.headcount ?? 0)
-
-  const memberHasOrder = (memberId: number): boolean =>
-    Object.values(memberOrders[memberId] ?? {}).some(s => s.qty > 0)
 
   // ── 找 menu 物件 ─────────────────────────────────────────
   const findMenu = (menuId: number): Menu => {
@@ -165,16 +154,16 @@ export default function CreateOrderPage() {
             .map(t => ({ topping_id: t.id!, name: t.name, price: t.price }))
         : null
       return {
-        order_id:  orderId,
-        store_id:  menu.store_id,
-        menu_id:   menu.id!,
-        vendor_id: vendor!.id!,
-        member_id: memberId,
-        quantity:  itemState.qty,
+        order_id:   orderId,
+        store_id:   menu.store_id,
+        menu_id:    menu.id!,
+        vendor_id:  vendor!.id!,
+        member_id:  memberId,
+        quantity:   itemState.qty,
         unit_price: menu.price,
-        sweetness: isDrink ? (itemState.sweetness || null) : null,
-        ice:       isDrink ? (itemState.ice || null) : null,
-        toppings:  toppingList,
+        sweetness:  isDrink ? (itemState.sweetness || null) : null,
+        ice:        isDrink ? (itemState.ice || null) : null,
+        toppings:   toppingList,
       }
     }
 
@@ -276,34 +265,11 @@ export default function CreateOrderPage() {
         onBack={() => setStep('select')}
       />
 
-      {/* 人員 tab 列 */}
-      {hasMember && (
-        <div className="flex overflow-x-auto bg-white border-b border-gray-200 px-2 gap-1">
-          {members.map(member => (
-            <button
-              key={member.id}
-              onClick={() => setActiveMemberId(member.id!)}
-              className={`shrink-0 flex items-center gap-1 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
-                activeMemberId === member.id
-                  ? 'border-orange-500 text-orange-500'
-                  : 'border-transparent text-gray-500'
-              }`}
-            >
-              {member.name}
-              {memberHasOrder(member.id!) && (
-                <span className="w-1.5 h-1.5 bg-orange-400 rounded-full shrink-0" />
-              )}
-            </button>
-          ))}
-        </div>
-      )}
-
       {/* 菜單列表 */}
       <div className="p-4 space-y-4 pb-36">
         {stores.map(store => {
           const isDrink    = (store.type ?? 'bento') === 'drink'
           const storeTopps = storeToppings[store.id!] ?? []
-          const mid        = hasMember ? (activeMemberId ?? undefined) : undefined
 
           return (
             <div key={store.id}>
@@ -312,12 +278,120 @@ export default function CreateOrderPage() {
               </div>
               <div className="space-y-2">
                 {store.menus.map(menu => {
-                  const itemState = getItemState(menu.id!, mid)
-                  const qty       = itemState.qty
 
+                  // ── 有人員：品項下方列出各人員 +/- ─────────────
+                  if (hasMember) {
+                    const memberTotal = members.reduce(
+                      (a, m) => a + (memberOrders[m.id!]?.[menu.id!]?.qty ?? 0), 0
+                    )
+                    return (
+                      <div key={menu.id} className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+                        {/* 品項標題列 */}
+                        <div className="px-3 py-3 flex items-center gap-3">
+                          {menu.image_base64 ? (
+                            <img src={menu.image_base64} alt={menu.name} className="w-10 h-10 rounded-lg object-cover shrink-0" />
+                          ) : (
+                            <div className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center text-xl shrink-0">
+                              {isDrink ? '🧋' : '🍱'}
+                            </div>
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <div className="text-sm font-medium text-gray-800 truncate">{menu.name}</div>
+                            <div className="text-xs text-orange-500">NT$ {menu.price}</div>
+                          </div>
+                          {memberTotal > 0 && (
+                            <span className="text-sm font-semibold text-orange-500 shrink-0">× {memberTotal}</span>
+                          )}
+                        </div>
+
+                        {/* 各人員 +/- 數量 */}
+                        <div className="border-t border-gray-100 divide-y divide-gray-50">
+                          {members.map(member => {
+                            const itemState = getItemState(menu.id!, member.id!)
+                            const qty       = itemState.qty
+                            return (
+                              <div key={member.id}>
+                                <div className="px-3 py-2.5 flex items-center justify-between">
+                                  <span className={`text-sm ${qty > 0 ? 'text-gray-800 font-medium' : 'text-gray-400'}`}>
+                                    {member.name}
+                                  </span>
+                                  <QuantityControl
+                                    value={qty}
+                                    onChange={q => setQty(menu.id!, q, member.id!)}
+                                  />
+                                </div>
+
+                                {/* 飲料客製化（qty > 0 時展開） */}
+                                {qty > 0 && isDrink && (
+                                  <div className="px-3 pb-2.5 pt-1 space-y-1.5 bg-gray-50">
+                                    <div className="flex flex-wrap items-center gap-1.5">
+                                      <span className="text-xs text-gray-400 w-8 shrink-0">甜度</span>
+                                      {SWEETNESS_OPTIONS.map(opt => (
+                                        <button
+                                          key={opt}
+                                          onClick={() => setSweetness(menu.id!, opt, member.id!)}
+                                          className={`px-2.5 py-0.5 text-xs rounded-full border transition-colors ${
+                                            itemState.sweetness === opt
+                                              ? 'border-orange-500 bg-orange-50 text-orange-600'
+                                              : 'border-gray-200 bg-white text-gray-500'
+                                          }`}
+                                        >
+                                          {opt}
+                                        </button>
+                                      ))}
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-1.5">
+                                      <span className="text-xs text-gray-400 w-8 shrink-0">冰塊</span>
+                                      {ICE_OPTIONS.map(opt => (
+                                        <button
+                                          key={opt}
+                                          onClick={() => setIce(menu.id!, opt, member.id!)}
+                                          className={`px-2.5 py-0.5 text-xs rounded-full border transition-colors ${
+                                            itemState.ice === opt
+                                              ? 'border-orange-500 bg-orange-50 text-orange-600'
+                                              : 'border-gray-200 bg-white text-gray-500'
+                                          }`}
+                                        >
+                                          {opt}
+                                        </button>
+                                      ))}
+                                    </div>
+                                    {storeTopps.length > 0 && (
+                                      <div className="flex flex-wrap items-center gap-1.5">
+                                        <span className="text-xs text-gray-400 w-8 shrink-0">加料</span>
+                                        {storeTopps.map(topping => {
+                                          const selected = itemState.toppingIds.includes(topping.id!)
+                                          return (
+                                            <button
+                                              key={topping.id}
+                                              onClick={() => toggleTopping(menu.id!, topping.id!, member.id!)}
+                                              className={`px-2.5 py-0.5 text-xs rounded-full border transition-colors ${
+                                                selected
+                                                  ? 'border-orange-500 bg-orange-50 text-orange-600'
+                                                  : 'border-gray-200 bg-white text-gray-500'
+                                              }`}
+                                            >
+                                              {topping.name} +{topping.price}
+                                            </button>
+                                          )
+                                        })}
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )
+                  }
+
+                  // ── 無人員：單一 +/- 數量 ─────────────────────
+                  const itemState = getItemState(menu.id!)
+                  const qty       = itemState.qty
                   return (
                     <div key={menu.id} className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-                      {/* 主列 */}
                       <div className="p-3 flex items-center gap-3">
                         {menu.image_base64 ? (
                           <img src={menu.image_base64} alt={menu.name} className="w-10 h-10 rounded-lg object-cover shrink-0" />
@@ -332,20 +406,17 @@ export default function CreateOrderPage() {
                         </div>
                         <QuantityControl
                           value={qty}
-                          onChange={q => setQty(menu.id!, q, mid)}
+                          onChange={q => setQty(menu.id!, q)}
                         />
                       </div>
-
-                      {/* 飲料客製化（qty > 0 時展開） */}
                       {qty > 0 && isDrink && (
                         <div className="px-3 pb-3 pt-1 space-y-2 border-t border-gray-100 bg-gray-50">
-                          {/* 甜度 */}
                           <div className="flex flex-wrap items-center gap-1.5">
                             <span className="text-xs text-gray-400 w-8 shrink-0">甜度</span>
                             {SWEETNESS_OPTIONS.map(opt => (
                               <button
                                 key={opt}
-                                onClick={() => setSweetness(menu.id!, opt, mid)}
+                                onClick={() => setSweetness(menu.id!, opt)}
                                 className={`px-2.5 py-1 text-xs rounded-full border transition-colors ${
                                   itemState.sweetness === opt
                                     ? 'border-orange-500 bg-orange-50 text-orange-600'
@@ -356,13 +427,12 @@ export default function CreateOrderPage() {
                               </button>
                             ))}
                           </div>
-                          {/* 冰塊 */}
                           <div className="flex flex-wrap items-center gap-1.5">
                             <span className="text-xs text-gray-400 w-8 shrink-0">冰塊</span>
                             {ICE_OPTIONS.map(opt => (
                               <button
                                 key={opt}
-                                onClick={() => setIce(menu.id!, opt, mid)}
+                                onClick={() => setIce(menu.id!, opt)}
                                 className={`px-2.5 py-1 text-xs rounded-full border transition-colors ${
                                   itemState.ice === opt
                                     ? 'border-orange-500 bg-orange-50 text-orange-600'
@@ -373,7 +443,6 @@ export default function CreateOrderPage() {
                               </button>
                             ))}
                           </div>
-                          {/* 加料 */}
                           {storeTopps.length > 0 && (
                             <div className="flex flex-wrap items-center gap-1.5">
                               <span className="text-xs text-gray-400 w-8 shrink-0">加料</span>
@@ -382,7 +451,7 @@ export default function CreateOrderPage() {
                                 return (
                                   <button
                                     key={topping.id}
-                                    onClick={() => toggleTopping(menu.id!, topping.id!, mid)}
+                                    onClick={() => toggleTopping(menu.id!, topping.id!)}
                                     className={`px-2.5 py-1 text-xs rounded-full border transition-colors ${
                                       selected
                                         ? 'border-orange-500 bg-orange-50 text-orange-600'

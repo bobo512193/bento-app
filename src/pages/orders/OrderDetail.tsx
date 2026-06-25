@@ -13,6 +13,9 @@ export type Maps = {
   member: Record<number, Member>
 }
 
+// 依店家
+type MemberDetail = { name: string; qty: number; total: number }
+
 type ItemRow = {
   menuName: string
   qty: number
@@ -22,7 +25,7 @@ type ItemRow = {
   sweetness: string | null
   ice: string | null
   toppingDesc: string | null
-  memberName: string | null
+  memberDetails: MemberDetail[] | null  // 飲料店：各人員姓名 + 金額
 }
 
 type StoreSection = {
@@ -34,36 +37,40 @@ type StoreSection = {
   storeTotal: number
 }
 
-type MemberSection = {
+// 依廠商（純統計，無人員）
+type VendorRow = { menuName: string; qty: number; total: number }
+type SimpleVendorSection = {
+  vendorId: number
+  vendorName: string
+  vendorTotal: number
+  rows: VendorRow[]
+}
+
+// 依人名
+type PersonRow = {
+  menuName: string
+  qty: number
+  unitPrice: number
+  toppingExtra: number
+  total: number
+  sweetness: string | null
+  ice: string | null
+  toppingDesc: string | null
+}
+
+type PersonSection = {
   memberId: number
   memberName: string
-  items: ItemRow[]
+  items: PersonRow[]
   memberTotal: number
   payment: OrderPayment | undefined
 }
 
-type VendorSection =
-  | { hasMembers: true;  vendorId: number; vendorName: string; vendorTotal: number; storeBreakdown: { storeName: string; total: number }[]; members: MemberSection[] }
-  | { hasMembers: false; vendorId: number; vendorName: string; vendorTotal: number; storeBreakdown: { storeName: string; total: number }[]; items: ItemRow[]; payment: OrderPayment | undefined }
+type PersonVendorSection =
+  | { hasMembers: true;  vendorId: number; vendorName: string; vendorTotal: number; members: PersonSection[] }
+  | { hasMembers: false; vendorId: number; vendorName: string; vendorTotal: number; items: PersonRow[]; payment: OrderPayment | undefined }
 
 // ── 聚合函數 ─────────────────────────────────────────────────
-
-function buildItemRow(item: OrderItem, maps: Maps, memberName: string | null = null): ItemRow {
-  const toppingExtra = item.toppings?.reduce((a, t) => a + t.price, 0) ?? 0
-  return {
-    menuName: maps.menu[item.menu_id]?.name ?? '已刪除品項',
-    qty: item.quantity,
-    unitPrice: item.unit_price,
-    toppingExtra,
-    total: (item.unit_price + toppingExtra) * item.quantity,
-    sweetness: item.sweetness ?? null,
-    ice: item.ice ?? null,
-    toppingDesc: item.toppings?.length
-      ? item.toppings.map(t => `+${t.name}`).join(' ')
-      : null,
-    memberName,
-  }
-}
 
 function buildByStore(items: OrderItem[], maps: Maps): StoreSection[] {
   const byStore = new Map<number, OrderItem[]>()
@@ -75,17 +82,45 @@ function buildByStore(items: OrderItem[], maps: Maps): StoreSection[] {
   return Array.from(byStore.entries()).map(([storeId, storeItems]) => {
     const store   = maps.store[storeId]
     const isDrink = (store?.type ?? 'bento') === 'drink'
-
     let rows: ItemRow[]
 
     if (isDrink) {
-      rows = storeItems.map(item => {
-        const mName = item.member_id != null
-          ? (maps.member[item.member_id]?.name ?? '已刪除人員')
-          : null
-        return buildItemRow(item, maps, mName)
+      // 飲料：相同品項+客製化合併，列出下單人名
+      const groups = new Map<string, { items: OrderItem[]; memberNames: string[] }>()
+      for (const item of storeItems) {
+        const toppingKey = (item.toppings ?? []).map(t => t.topping_id).sort().join(',')
+        const key = `${item.menu_id}|${item.sweetness ?? ''}|${item.ice ?? ''}|${toppingKey}`
+        if (!groups.has(key)) groups.set(key, { items: [], memberNames: [] })
+        const g = groups.get(key)!
+        g.items.push(item)
+        if (item.member_id != null) {
+          const mName = maps.member[item.member_id]?.name
+          if (mName && !g.memberNames.includes(mName)) g.memberNames.push(mName)
+        }
+      }
+      rows = Array.from(groups.values()).map(({ items: grp }) => {
+        const first        = grp[0]
+        const toppingExtra = first.toppings?.reduce((a, t) => a + t.price, 0) ?? 0
+        const qty          = grp.reduce((a, i) => a + i.quantity, 0)
+        const memberDetails: MemberDetail[] = grp
+          .filter(item => item.member_id != null)
+          .map(item => ({
+            name:  maps.member[item.member_id!]?.name ?? '已刪除人員',
+            qty:   item.quantity,
+            total: (item.unit_price + toppingExtra) * item.quantity,
+          }))
+        return {
+          menuName: maps.menu[first.menu_id]?.name ?? '已刪除品項',
+          qty, unitPrice: first.unit_price, toppingExtra,
+          total: (first.unit_price + toppingExtra) * qty,
+          sweetness: first.sweetness ?? null,
+          ice: first.ice ?? null,
+          toppingDesc: first.toppings?.length ? first.toppings.map(t => `+${t.name}`).join(' ') : null,
+          memberDetails: memberDetails.length > 0 ? memberDetails : null,
+        }
       })
     } else {
+      // 便當：依品項彙總數量
       const byMenu = new Map<number, { qty: number; unitPrice: number }>()
       for (const item of storeItems) {
         const prev = byMenu.get(item.menu_id)
@@ -95,13 +130,13 @@ function buildByStore(items: OrderItem[], maps: Maps): StoreSection[] {
         menuName: maps.menu[menuId]?.name ?? '已刪除品項',
         qty, unitPrice, toppingExtra: 0,
         total: qty * unitPrice,
-        sweetness: null, ice: null, toppingDesc: null, memberName: null,
+        sweetness: null, ice: null, toppingDesc: null, memberDetails: null,
       }))
     }
 
     return {
       storeId,
-      storeName: store?.name ?? '已刪除店家',
+      storeName:  store?.name  ?? '已刪除店家',
       storePhone: store?.phone ?? '',
       isDrink,
       items: rows,
@@ -110,7 +145,7 @@ function buildByStore(items: OrderItem[], maps: Maps): StoreSection[] {
   })
 }
 
-function buildByVendor(items: OrderItem[], payments: OrderPayment[], maps: Maps): VendorSection[] {
+function buildByVendor(items: OrderItem[], maps: Maps): SimpleVendorSection[] {
   const byVendor = new Map<number, OrderItem[]>()
   for (const item of items) {
     if (!byVendor.has(item.vendor_id)) byVendor.set(item.vendor_id, [])
@@ -118,15 +153,49 @@ function buildByVendor(items: OrderItem[], payments: OrderPayment[], maps: Maps)
   }
 
   return Array.from(byVendor.entries()).map(([vendorId, vendorItems]) => {
-    const storeMap = new Map<number, number>()
+    // 同品項數量合計（不論人員與客製化）
+    const byMenu = new Map<number, { qty: number; realTotal: number }>()
     for (const item of vendorItems) {
       const extra = item.toppings?.reduce((a, t) => a + t.price, 0) ?? 0
-      storeMap.set(item.store_id, (storeMap.get(item.store_id) ?? 0) + (item.unit_price + extra) * item.quantity)
+      const prev  = byMenu.get(item.menu_id)
+      byMenu.set(item.menu_id, {
+        qty:       (prev?.qty ?? 0) + item.quantity,
+        realTotal: (prev?.realTotal ?? 0) + (item.unit_price + extra) * item.quantity,
+      })
     }
-    const storeBreakdown = Array.from(storeMap.entries()).map(([sid, total]) => ({
-      storeName: maps.store[sid]?.name ?? '已刪除店家', total,
+    const rows: VendorRow[] = Array.from(byMenu.entries()).map(([menuId, { qty, realTotal }]) => ({
+      menuName: maps.menu[menuId]?.name ?? '已刪除品項',
+      qty, total: realTotal,
     }))
+    return {
+      vendorId,
+      vendorName:  maps.vendor[vendorId]?.name ?? '已刪除廠商',
+      vendorTotal: rows.reduce((a, r) => a + r.total, 0),
+      rows,
+    }
+  })
+}
 
+function buildByMember(items: OrderItem[], payments: OrderPayment[], maps: Maps): PersonVendorSection[] {
+  const byVendor = new Map<number, OrderItem[]>()
+  for (const item of items) {
+    if (!byVendor.has(item.vendor_id)) byVendor.set(item.vendor_id, [])
+    byVendor.get(item.vendor_id)!.push(item)
+  }
+
+  const toRow = (item: OrderItem): PersonRow => {
+    const toppingExtra = item.toppings?.reduce((a, t) => a + t.price, 0) ?? 0
+    return {
+      menuName: maps.menu[item.menu_id]?.name ?? '已刪除品項',
+      qty: item.quantity, unitPrice: item.unit_price, toppingExtra,
+      total: (item.unit_price + toppingExtra) * item.quantity,
+      sweetness: item.sweetness ?? null,
+      ice: item.ice ?? null,
+      toppingDesc: item.toppings?.length ? item.toppings.map(t => `+${t.name}`).join(' ') : null,
+    }
+  }
+
+  return Array.from(byVendor.entries()).map(([vendorId, vendorItems]) => {
     const hasMembers = vendorItems.some(i => i.member_id != null)
 
     if (hasMembers) {
@@ -136,8 +205,8 @@ function buildByVendor(items: OrderItem[], payments: OrderPayment[], maps: Maps)
         if (!byMember.has(item.member_id)) byMember.set(item.member_id, [])
         byMember.get(item.member_id)!.push(item)
       }
-      const members: MemberSection[] = Array.from(byMember.entries()).map(([memberId, mItems]) => {
-        const rows = mItems.map(item => buildItemRow(item, maps))
+      const members: PersonSection[] = Array.from(byMember.entries()).map(([memberId, mItems]) => {
+        const rows = mItems.map(toRow)
         return {
           memberId,
           memberName: maps.member[memberId]?.name ?? '已刪除人員',
@@ -148,17 +217,17 @@ function buildByVendor(items: OrderItem[], payments: OrderPayment[], maps: Maps)
       })
       return {
         hasMembers: true as const, vendorId,
-        vendorName: maps.vendor[vendorId]?.name ?? '已刪除廠商',
+        vendorName:  maps.vendor[vendorId]?.name ?? '已刪除廠商',
         vendorTotal: members.reduce((a, m) => a + m.memberTotal, 0),
-        storeBreakdown, members,
+        members,
       }
     } else {
-      const rows = vendorItems.map(item => buildItemRow(item, maps))
+      const rows = vendorItems.map(toRow)
       return {
         hasMembers: false as const, vendorId,
-        vendorName: maps.vendor[vendorId]?.name ?? '已刪除廠商',
+        vendorName:  maps.vendor[vendorId]?.name ?? '已刪除廠商',
         vendorTotal: rows.reduce((a, r) => a + r.total, 0),
-        storeBreakdown, items: rows,
+        items: rows,
         payment: payments.find(p => p.vendor_id === vendorId && p.member_id == null),
       }
     }
@@ -167,13 +236,15 @@ function buildByVendor(items: OrderItem[], payments: OrderPayment[], maps: Maps)
 
 // ── 子元件 ───────────────────────────────────────────────────
 
-function DrinkMeta({ row }: { row: ItemRow }) {
-  const parts = [row.sweetness, row.ice, row.toppingDesc].filter(Boolean)
+function DrinkMeta({ sweetness, ice, toppingDesc, toppingExtra }: {
+  sweetness: string | null; ice: string | null; toppingDesc: string | null; toppingExtra: number
+}) {
+  const parts = [sweetness, ice, toppingDesc].filter(Boolean)
   if (!parts.length) return null
   return (
     <div className="text-xs text-blue-500 mt-0.5">
       {parts.join(' ')}
-      {row.toppingExtra > 0 && <span className="text-gray-400"> (加料 +{row.toppingExtra})</span>}
+      {toppingExtra > 0 && <span className="text-gray-400"> (加料 +{toppingExtra})</span>}
     </div>
   )
 }
@@ -213,10 +284,9 @@ function EditItemRow({ item, maps, onQtyChange, onDelete }: {
 interface Props { order: Order; maps: Maps }
 
 export default function OrderDetail({ order, maps }: Props) {
-  const [activeTab, setActiveTab]             = useState<'store' | 'vendor'>('store')
-  const [expandedVendorId, setExpandedVendorId] = useState<number | null>(null)
+  const [activeTab, setActiveTab]                   = useState<'store' | 'vendor' | 'person'>('store')
   const [showCompleteConfirm, setShowCompleteConfirm] = useState(false)
-  const [isEditing, setIsEditing]             = useState(false)
+  const [isEditing, setIsEditing]                   = useState(false)
 
   const detail = useLiveQuery(async () => {
     const [items, payments] = await Promise.all([
@@ -232,7 +302,8 @@ export default function OrderDetail({ order, maps }: Props) {
 
   const { items, payments } = detail
   const storeView   = buildByStore(items, maps)
-  const vendorView  = buildByVendor(items, payments, maps)
+  const vendorView  = buildByVendor(items, maps)
+  const personView  = buildByMember(items, payments, maps)
   const allPaid     = payments.length > 0 && payments.every(p => p.is_paid)
   const isCompleted = order.status === 'completed'
 
@@ -255,12 +326,43 @@ export default function OrderDetail({ order, maps }: Props) {
   return (
     <div className="border-t border-gray-100">
 
-      {/* 操作列：編輯按鈕（尚未完成才顯示） */}
+      {/* ── 操作列：完成訂單 + 編輯訂單（同一行） ─────────── */}
       {!isCompleted && (
-        <div className="flex justify-end px-4 py-2 bg-white border-b border-gray-100">
+        <div className="flex items-center justify-between gap-2 px-4 py-2 bg-white border-b border-gray-100">
+          {/* 左：完成訂單 */}
+          {allPaid ? (
+            !showCompleteConfirm ? (
+              <button
+                onClick={() => setShowCompleteConfirm(true)}
+                className="text-xs px-3 py-1.5 rounded-full bg-green-500 text-white font-medium"
+              >
+                完成訂單
+              </button>
+            ) : (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-gray-500">確認完成？</span>
+                <button
+                  onClick={() => setShowCompleteConfirm(false)}
+                  className="text-xs px-2.5 py-1 rounded-full border border-gray-200 text-gray-500"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={() => { orderService.complete(order.id!); setShowCompleteConfirm(false) }}
+                  className="text-xs px-2.5 py-1 rounded-full bg-green-500 text-white font-medium"
+                >
+                  確認
+                </button>
+              </div>
+            )
+          ) : (
+            <span className="text-xs text-gray-300">依人名全部付款後可完成</span>
+          )}
+
+          {/* 右：編輯訂單 */}
           <button
             onClick={() => setIsEditing(!isEditing)}
-            className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
+            className={`text-xs px-3 py-1.5 rounded-full border transition-colors shrink-0 ${
               isEditing
                 ? 'bg-orange-500 text-white border-orange-500'
                 : 'text-orange-400 border-orange-200'
@@ -318,9 +420,9 @@ export default function OrderDetail({ order, maps }: Props) {
       {/* ── 一般顯示模式 ──────────────────────────────────────── */}
       {!isEditing && (
         <>
-          {/* Tab 列 */}
+          {/* Tab 列：3 個 */}
           <div className="flex border-b border-gray-200">
-            {(['store', 'vendor'] as const).map(tab => (
+            {(['store', 'vendor', 'person'] as const).map(tab => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
@@ -330,7 +432,7 @@ export default function OrderDetail({ order, maps }: Props) {
                     : 'text-gray-500 bg-gray-50'
                 }`}
               >
-                {tab === 'store' ? '依店家' : '依廠商'}
+                {tab === 'store' ? '依店家' : tab === 'vendor' ? '依廠商' : '依人名'}
               </button>
             ))}
           </div>
@@ -360,9 +462,23 @@ export default function OrderDetail({ order, maps }: Props) {
                               {row.menuName}
                               <span className="text-gray-400 ml-1.5">× {row.qty}</span>
                             </span>
-                            {sec.isDrink && <DrinkMeta row={row} />}
-                            {sec.isDrink && row.memberName && (
-                              <div className="text-xs text-gray-400 mt-0.5">· {row.memberName}</div>
+                            {sec.isDrink && (
+                              <DrinkMeta
+                                sweetness={row.sweetness} ice={row.ice}
+                                toppingDesc={row.toppingDesc} toppingExtra={row.toppingExtra}
+                              />
+                            )}
+                            {sec.isDrink && row.memberDetails && (
+                              <div className="mt-1 space-y-0.5">
+                                {row.memberDetails.map((d, j) => (
+                                  <div key={j} className="flex items-center justify-between">
+                                    <span className="text-xs text-gray-400">
+                                      · {d.name}{d.qty > 1 ? ` ×${d.qty}` : ''}
+                                    </span>
+                                    <span className="text-xs text-gray-400">NT$ {d.total}</span>
+                                  </div>
+                                ))}
+                              </div>
                             )}
                           </div>
                           <span className="text-sm text-gray-600 shrink-0">NT$ {row.total}</span>
@@ -378,71 +494,107 @@ export default function OrderDetail({ order, maps }: Props) {
             </div>
           )}
 
-          {/* ── 依廠商 ──────────────────────────────────────────── */}
+          {/* ── 依廠商（純統計，同品項合計） ────────────────────── */}
           {activeTab === 'vendor' && (
             <div className="p-4 space-y-3">
               {vendorView.map(sec => (
                 <div key={sec.vendorId} className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-                  {/* 廠商標題 */}
-                  <button
-                    onClick={() =>
-                      sec.hasMembers &&
-                      setExpandedVendorId(expandedVendorId === sec.vendorId ? null : sec.vendorId)
-                    }
-                    className="w-full text-left"
-                  >
-                    <div className="flex items-center justify-between px-4 py-3 bg-gray-50">
-                      <span className="text-sm font-semibold text-gray-700">{sec.vendorName}</span>
-                      <div className="flex items-center gap-2">
-                        {/* 有人員時在標題顯示付款進度 */}
-                        {sec.hasMembers && (() => {
-                          const paid  = sec.members.filter(m => m.payment?.is_paid).length
-                          const total = sec.members.length
-                          return (
-                            <span className={`text-xs px-2 py-0.5 rounded-full ${
-                              paid === total
-                                ? 'bg-green-100 text-green-600'
-                                : 'bg-gray-100 text-gray-500'
-                            }`}>
-                              {paid}/{total} 已付
-                            </span>
-                          )
-                        })()}
-                        <span className="text-sm font-semibold text-orange-500">NT$ {sec.vendorTotal}</span>
-                        {sec.hasMembers && (
-                          <span className="text-gray-400 text-sm">
-                            {expandedVendorId === sec.vendorId ? '∨' : '›'}
-                          </span>
-                        )}
+                  <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-100">
+                    <span className="text-sm font-semibold text-gray-700">{sec.vendorName}</span>
+                    <span className="text-sm font-semibold text-orange-500">NT$ {sec.vendorTotal}</span>
+                  </div>
+                  <div className="divide-y divide-gray-50">
+                    {sec.rows.map((row, i) => (
+                      <div key={i} className="px-4 py-2.5 flex items-center justify-between">
+                        <span className="text-sm text-gray-700">
+                          {row.menuName}
+                          <span className="text-gray-400 ml-1.5">× {row.qty}</span>
+                        </span>
+                        <span className="text-sm text-gray-500">NT$ {row.total}</span>
                       </div>
-                    </div>
-                    {sec.storeBreakdown.length > 1 && (
-                      <div className="flex flex-wrap gap-2 px-4 py-2 border-t border-gray-100 bg-gray-50">
-                        {sec.storeBreakdown.map((s, i) => (
-                          <span key={i} className="text-xs text-gray-500">
-                            {s.storeName} NT${s.total}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+              {vendorView.length === 0 && (
+                <p className="text-center text-gray-400 py-6 text-sm">尚無品項</p>
+              )}
+            </div>
+          )}
 
-                  {/* 無人員：品項列表 + 付款 */}
+          {/* ── 依人名（廠商→人員，含付款） ──────────────────────── */}
+          {activeTab === 'person' && (
+            <div className="p-4 space-y-3">
+              {personView.map(sec => (
+                <div key={sec.vendorId} className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+                  {/* 廠商標題 */}
+                  <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-100">
+                    <span className="text-sm font-semibold text-gray-700">{sec.vendorName}</span>
+                    <span className="text-sm font-semibold text-orange-500">NT$ {sec.vendorTotal}</span>
+                  </div>
+
+                  {/* 有人員 */}
+                  {sec.hasMembers && (
+                    <div className="divide-y divide-gray-100">
+                      {sec.members.map(member => (
+                        <div key={member.memberId} className="px-4 py-3">
+                          {/* 人員標題列 + 付款 */}
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-sm font-medium text-gray-700">{member.memberName}</span>
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-semibold text-orange-500">NT$ {member.memberTotal}</span>
+                              {member.payment && (
+                                <label className="flex items-center gap-1.5 cursor-pointer">
+                                  <span className={`text-xs ${member.payment.is_paid ? 'text-green-600 font-medium' : 'text-gray-400'}`}>
+                                    {member.payment.is_paid ? '已付' : '未付'}
+                                  </span>
+                                  <input
+                                    type="checkbox"
+                                    checked={member.payment.is_paid}
+                                    disabled={isCompleted}
+                                    onChange={() => orderService.togglePayment(member.payment!.id!)}
+                                    className="w-5 h-5 accent-orange-500"
+                                  />
+                                </label>
+                              )}
+                            </div>
+                          </div>
+                          {/* 品項明細 */}
+                          <div className="space-y-1">
+                            {member.items.map((row, i) => (
+                              <div key={i}>
+                                <div className="flex justify-between">
+                                  <span className="text-xs text-gray-500">{row.menuName} × {row.qty}</span>
+                                  <span className="text-xs text-gray-400">NT$ {row.total}</span>
+                                </div>
+                                {(row.sweetness || row.toppingDesc) && (
+                                  <div className="text-xs text-blue-400 mt-0.5 ml-2">
+                                    {[row.sweetness, row.ice, row.toppingDesc].filter(Boolean).join(' ')}
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* 無人員（廠商訂購） */}
                   {!sec.hasMembers && (
                     <>
-                      <div className="divide-y divide-gray-50 border-t border-gray-100">
+                      <div className="divide-y divide-gray-50">
                         {sec.items.map((row, i) => (
                           <div key={i} className="px-4 py-2.5">
-                            <div className="flex items-start justify-between gap-2">
-                              <div className="flex-1 min-w-0">
-                                <span className="text-sm text-gray-700">
-                                  {row.menuName}
-                                  <span className="text-gray-400 ml-1.5">× {row.qty}</span>
-                                </span>
-                                {(row.sweetness || row.toppingDesc) && <DrinkMeta row={row} />}
-                              </div>
-                              <span className="text-sm text-gray-600 shrink-0">NT$ {row.total}</span>
+                            <div className="flex justify-between">
+                              <span className="text-sm text-gray-600">{row.menuName} × {row.qty}</span>
+                              <span className="text-sm text-gray-500">NT$ {row.total}</span>
                             </div>
+                            {(row.sweetness || row.toppingDesc) && (
+                              <div className="text-xs text-blue-400 mt-0.5">
+                                {[row.sweetness, row.ice, row.toppingDesc].filter(Boolean).join(' ')}
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -462,91 +614,14 @@ export default function OrderDetail({ order, maps }: Props) {
                       )}
                     </>
                   )}
-
-                  {/* 有人員：展開後顯示每位人員 */}
-                  {sec.hasMembers && expandedVendorId === sec.vendorId && (
-                    <div className="divide-y divide-gray-100 border-t border-gray-100">
-                      {sec.members.map(member => (
-                        <div key={member.memberId} className="px-4 py-3">
-                          <div className="flex items-center justify-between mb-2">
-                            <span className="text-sm font-medium text-gray-700">{member.memberName}</span>
-                            <div className="flex items-center gap-3">
-                              <span className="text-sm font-semibold text-orange-500">NT$ {member.memberTotal}</span>
-                              {member.payment && (
-                                <label className="flex items-center gap-1.5 cursor-pointer">
-                                  <span className={`text-xs ${member.payment.is_paid ? 'text-green-600 font-medium' : 'text-gray-400'}`}>
-                                    {member.payment.is_paid ? '已付' : '未付'}
-                                  </span>
-                                  <input
-                                    type="checkbox"
-                                    checked={member.payment.is_paid}
-                                    disabled={isCompleted}
-                                    onChange={() => orderService.togglePayment(member.payment!.id!)}
-                                    className="w-5 h-5 accent-orange-500"
-                                  />
-                                </label>
-                              )}
-                            </div>
-                          </div>
-                          <div className="space-y-1">
-                            {member.items.map((row, i) => (
-                              <div key={i}>
-                                <div className="flex justify-between">
-                                  <span className="text-xs text-gray-400">{row.menuName} × {row.qty}</span>
-                                  <span className="text-xs text-gray-400">NT$ {row.total}</span>
-                                </div>
-                                {(row.sweetness || row.toppingDesc) && (
-                                  <div className="text-xs text-blue-400 mt-0.5 ml-2">
-                                    {[row.sweetness, row.ice, row.toppingDesc].filter(Boolean).join(' ')}
-                                  </div>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
                 </div>
               ))}
-              {vendorView.length === 0 && (
+              {personView.length === 0 && (
                 <p className="text-center text-gray-400 py-6 text-sm">尚無品項</p>
               )}
             </div>
           )}
         </>
-      )}
-
-      {/* 完成訂單按鈕 */}
-      {!isCompleted && !isEditing && allPaid && (
-        <div className="px-4 pb-4">
-          {!showCompleteConfirm ? (
-            <button
-              onClick={() => setShowCompleteConfirm(true)}
-              className="w-full py-3 bg-green-500 text-white text-sm font-semibold rounded-xl"
-            >
-              完成訂單
-            </button>
-          ) : (
-            <div className="space-y-2">
-              <p className="text-xs text-gray-400 text-center">完成後訂單將鎖定，無法再修改付款狀態</p>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setShowCompleteConfirm(false)}
-                  className="flex-1 py-2.5 border border-gray-200 rounded-xl text-sm text-gray-600"
-                >
-                  取消
-                </button>
-                <button
-                  onClick={() => { orderService.complete(order.id!); setShowCompleteConfirm(false) }}
-                  className="flex-1 py-2.5 bg-green-500 text-white text-sm font-semibold rounded-xl"
-                >
-                  確認完成
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
       )}
     </div>
   )
