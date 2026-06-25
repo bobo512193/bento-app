@@ -79,6 +79,15 @@ export const orderService = {
     if (p) await db.order_payments.update(id, { is_paid: !p.is_paid })
   },
 
+  setMemberPayments: async (order_id: number, member_id: number | null, is_paid: boolean) => {
+    const all = await db.order_payments.where('order_id').equals(order_id).toArray()
+    await Promise.all(
+      all
+        .filter(p => p.member_id === member_id)
+        .map(p => db.order_payments.update(p.id!, { is_paid }))
+    )
+  },
+
   // ── 刪除（訂單管理清除用） ───────────────────────────────
 
   deleteByDates: async (dates: string[]) => {

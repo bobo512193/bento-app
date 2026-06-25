@@ -63,17 +63,20 @@ type PersonRow = {
   toppingDesc: string | null
 }
 
-type PersonSection = {
-  memberId: number
-  memberName: string
+type PersonVendorRow = {
+  vendorId: number
+  vendorName: string
   items: PersonRow[]
-  memberTotal: number
-  payment: OrderPayment | undefined
+  subtotal: number
 }
 
-type PersonVendorSection =
-  | { hasMembers: true;  vendorId: number; vendorName: string; vendorTotal: number; members: PersonSection[] }
-  | { hasMembers: false; vendorId: number; vendorName: string; vendorTotal: number; items: PersonRow[]; payment: OrderPayment | undefined }
+type PersonFullSection = {
+  memberId: number | null
+  memberName: string
+  vendorRows: PersonVendorRow[]
+  memberTotal: number
+  memberPayments: OrderPayment[]
+}
 
 // ── 聚合函數 ─────────────────────────────────────────────────
 
@@ -182,11 +185,12 @@ function buildByVendor(items: OrderItem[], maps: Maps): SimpleVendorSection[] {
   })
 }
 
-function buildByMember(items: OrderItem[], payments: OrderPayment[], maps: Maps): PersonVendorSection[] {
-  const byVendor = new Map<number, OrderItem[]>()
+function buildByPerson(items: OrderItem[], payments: OrderPayment[], maps: Maps): PersonFullSection[] {
+  const byMember = new Map<number | null, OrderItem[]>()
   for (const item of items) {
-    if (!byVendor.has(item.vendor_id)) byVendor.set(item.vendor_id, [])
-    byVendor.get(item.vendor_id)!.push(item)
+    const key = item.member_id ?? null
+    if (!byMember.has(key)) byMember.set(key, [])
+    byMember.get(key)!.push(item)
   }
 
   const toRow = (item: OrderItem): PersonRow => {
@@ -201,41 +205,36 @@ function buildByMember(items: OrderItem[], payments: OrderPayment[], maps: Maps)
     }
   }
 
-  return Array.from(byVendor.entries()).map(([vendorId, vendorItems]) => {
-    const hasMembers = vendorItems.some(i => i.member_id != null)
+  return Array.from(byMember.entries()).map(([memberId, memberItems]) => {
+    const byVendor = new Map<number, OrderItem[]>()
+    for (const item of memberItems) {
+      if (!byVendor.has(item.vendor_id)) byVendor.set(item.vendor_id, [])
+      byVendor.get(item.vendor_id)!.push(item)
+    }
 
-    if (hasMembers) {
-      const byMember = new Map<number, OrderItem[]>()
-      for (const item of vendorItems) {
-        if (item.member_id == null) continue
-        if (!byMember.has(item.member_id)) byMember.set(item.member_id, [])
-        byMember.get(item.member_id)!.push(item)
-      }
-      const members: PersonSection[] = Array.from(byMember.entries()).map(([memberId, mItems]) => {
-        const rows = mItems.map(toRow)
-        return {
-          memberId,
-          memberName: maps.member[memberId]?.name ?? '已刪除人員',
-          items: rows,
-          memberTotal: rows.reduce((a, r) => a + r.total, 0),
-          payment: payments.find(p => p.vendor_id === vendorId && p.member_id === memberId),
-        }
-      })
+    const vendorRows: PersonVendorRow[] = Array.from(byVendor.entries()).map(([vendorId, vItems]) => {
+      const rows = vItems.map(toRow)
       return {
-        hasMembers: true as const, vendorId,
-        vendorName:  maps.vendor[vendorId]?.name ?? '已刪除廠商',
-        vendorTotal: members.reduce((a, m) => a + m.memberTotal, 0),
-        members,
-      }
-    } else {
-      const rows = vendorItems.map(toRow)
-      return {
-        hasMembers: false as const, vendorId,
-        vendorName:  maps.vendor[vendorId]?.name ?? '已刪除廠商',
-        vendorTotal: rows.reduce((a, r) => a + r.total, 0),
+        vendorId,
+        vendorName: maps.vendor[vendorId]?.name ?? '已刪除廠商',
         items: rows,
-        payment: payments.find(p => p.vendor_id === vendorId && p.member_id == null),
+        subtotal: rows.reduce((a, r) => a + r.total, 0),
       }
+    })
+
+    const memberTotal = vendorRows.reduce((a, v) => a + v.subtotal, 0)
+    const memberPayments = memberId != null
+      ? payments.filter(p => p.member_id === memberId)
+      : payments.filter(p => p.member_id == null)
+
+    return {
+      memberId,
+      memberName: memberId != null
+        ? (maps.member[memberId]?.name ?? '已刪除人員')
+        : '廠商訂購',
+      vendorRows,
+      memberTotal,
+      memberPayments,
     }
   })
 }
@@ -309,18 +308,22 @@ export default function OrderDetail({ order, maps }: Props) {
   const { items, payments } = detail
   const storeView   = buildByStore(items, maps)
   const vendorView  = buildByVendor(items, maps)
-  const personView  = buildByMember(items, payments, maps)
+  const personView  = buildByPerson(items, payments, maps)
   const allPaid     = payments.length > 0 && payments.every(p => p.is_paid)
   const isCompleted = order.status === 'completed'
 
   // ── edit helpers ─────────────────────────────────────────
   const hasMembersInItems = items.some(i => i.member_id != null)
-  const itemsByMember = new Map<number | null, OrderItem[]>()
-  for (const item of items) {
-    const key = item.member_id ?? null
-    if (!itemsByMember.has(key)) itemsByMember.set(key, [])
-    itemsByMember.get(key)!.push(item)
-  }
+  const editVendorGroups = Array.from(
+    items.reduce((acc, item) => {
+      if (!acc.has(item.vendor_id)) acc.set(item.vendor_id, new Map<number | null, OrderItem[]>())
+      const vm = acc.get(item.vendor_id)!
+      const k = item.member_id ?? null
+      if (!vm.has(k)) vm.set(k, [])
+      vm.get(k)!.push(item)
+      return acc
+    }, new Map<number, Map<number | null, OrderItem[]>>()).entries()
+  )
 
   const handleQtyChange = (item: OrderItem, qty: number) => {
     orderService.updateItem(item.id!, { quantity: qty })
@@ -386,41 +389,35 @@ export default function OrderDetail({ order, maps }: Props) {
       {/* ── 編輯模式 ─────────────────────────────────────────── */}
       {isEditing && (
         <div className="px-4 py-4 space-y-4">
-          {hasMembersInItems
-            ? Array.from(itemsByMember.entries()).map(([memberId, memberItems]) => (
-                <div key={memberId ?? 'null'}>
-                  <div className="text-xs font-semibold text-gray-400 mb-2 px-1">
-                    {memberId != null
-                      ? (maps.member[memberId]?.name ?? '已刪除人員')
-                      : '廠商訂購'}
+          {editVendorGroups.map(([vendorId, memberMap]) => (
+            <div key={vendorId}>
+              <div className="text-xs font-semibold text-gray-500 mb-2 px-1">
+                {maps.vendor[vendorId]?.name ?? '已刪除廠商'}
+              </div>
+              <div className="space-y-3">
+                {Array.from(memberMap.entries()).map(([memberId, memberItems]) => (
+                  <div key={memberId ?? 'null'}>
+                    {hasMembersInItems && memberId != null && (
+                      <div className="text-xs text-gray-400 mb-1.5 px-1">
+                        {maps.member[memberId]?.name ?? '已刪除人員'}
+                      </div>
+                    )}
+                    <div className="space-y-2">
+                      {memberItems.map(item => (
+                        <EditItemRow
+                          key={item.id}
+                          item={item}
+                          maps={maps}
+                          onQtyChange={qty => handleQtyChange(item, qty)}
+                          onDelete={() => handleDelete(item)}
+                        />
+                      ))}
+                    </div>
                   </div>
-                  <div className="space-y-2">
-                    {memberItems.map(item => (
-                      <EditItemRow
-                        key={item.id}
-                        item={item}
-                        maps={maps}
-                        onQtyChange={qty => handleQtyChange(item, qty)}
-                        onDelete={() => handleDelete(item)}
-                      />
-                    ))}
-                  </div>
-                </div>
-              ))
-            : (
-              <div className="space-y-2">
-                {items.map(item => (
-                  <EditItemRow
-                    key={item.id}
-                    item={item}
-                    maps={maps}
-                    onQtyChange={qty => handleQtyChange(item, qty)}
-                    onDelete={() => handleDelete(item)}
-                  />
                 ))}
               </div>
-            )
-          }
+            </div>
+          ))}
           {items.length === 0 && (
             <p className="text-center text-gray-400 py-4 text-sm">已無品項</p>
           )}
@@ -533,100 +530,59 @@ export default function OrderDetail({ order, maps }: Props) {
             </div>
           )}
 
-          {/* ── 依人名（廠商→人員，含付款） ──────────────────────── */}
+          {/* ── 依人名（人員→廠商，一鍵付款） ──────────────────────── */}
           {activeTab === 'person' && (
             <div className="p-4 space-y-3">
-              {personView.map(sec => (
-                <div key={sec.vendorId} className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-                  {/* 廠商標題 */}
-                  <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-100">
-                    <span className="text-sm font-semibold text-gray-700">{sec.vendorName}</span>
-                    <span className="text-sm font-semibold text-orange-500">NT$ {sec.vendorTotal}</span>
-                  </div>
-
-                  {/* 有人員 */}
-                  {sec.hasMembers && (
-                    <div className="divide-y divide-gray-100">
-                      {sec.members.map(member => (
-                        <div key={member.memberId} className="px-4 py-3">
-                          {/* 人員標題列 + 付款 */}
-                          <div className="flex items-center justify-between mb-2">
-                            <span className="text-sm font-medium text-gray-700">{member.memberName}</span>
-                            <div className="flex items-center gap-2">
-                              <span className="text-sm font-semibold text-orange-500">NT$ {member.memberTotal}</span>
-                              {member.payment && (
-                                <label className="flex items-center gap-1.5 cursor-pointer">
-                                  <span className={`text-xs ${member.payment.is_paid ? 'text-green-600 font-medium' : 'text-gray-400'}`}>
-                                    {member.payment.is_paid ? '已付' : '未付'}
-                                  </span>
-                                  <input
-                                    type="checkbox"
-                                    checked={member.payment.is_paid}
-                                    disabled={isCompleted}
-                                    onChange={() => orderService.togglePayment(member.payment!.id!)}
-                                    className="w-5 h-5 accent-orange-500"
-                                  />
-                                </label>
-                              )}
-                            </div>
-                          </div>
-                          {/* 品項明細 */}
-                          <div className="space-y-1">
-                            {member.items.map((row, i) => (
-                              <div key={i}>
-                                <div className="flex justify-between">
-                                  <span className="text-xs text-gray-500">{row.menuName} × {row.qty}</span>
-                                  <span className="text-xs text-gray-400">NT$ {row.total}</span>
-                                </div>
-                                {(row.sweetness || row.toppingDesc) && (
-                                  <div className="text-xs text-blue-400 mt-0.5 ml-2">
-                                    {[row.sweetness, row.ice, row.toppingDesc].filter(Boolean).join(' ')}
-                                  </div>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      ))}
+              {personView.map(sec => {
+                const memberAllPaid = sec.memberPayments.length > 0 && sec.memberPayments.every(p => p.is_paid)
+                return (
+                  <div key={sec.memberId ?? 'null'} className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+                    {/* 人員標題 + 付款 toggle */}
+                    <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-100">
+                      <span className="text-sm font-semibold text-gray-700">{sec.memberName}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-semibold text-orange-500">NT$ {sec.memberTotal}</span>
+                        {sec.memberPayments.length > 0 && (
+                          <label className="flex items-center gap-1.5 cursor-pointer">
+                            <span className={`text-xs ${memberAllPaid ? 'text-green-600 font-medium' : 'text-gray-400'}`}>
+                              {memberAllPaid ? '已付' : '未付'}
+                            </span>
+                            <input
+                              type="checkbox"
+                              checked={memberAllPaid}
+                              disabled={isCompleted}
+                              onChange={() => orderService.setMemberPayments(order.id!, sec.memberId, !memberAllPaid)}
+                              className="w-5 h-5 accent-orange-500"
+                            />
+                          </label>
+                        )}
+                      </div>
                     </div>
-                  )}
-
-                  {/* 無人員（廠商訂購） */}
-                  {!sec.hasMembers && (
-                    <>
-                      <div className="divide-y divide-gray-50">
-                        {sec.items.map((row, i) => (
-                          <div key={i} className="px-4 py-2.5">
+                    {/* 廠商明細 */}
+                    {sec.vendorRows.map((vRow, vi) => (
+                      <div key={vRow.vendorId} className={vi > 0 ? 'border-t border-gray-100' : ''}>
+                        <div className="flex items-center justify-between px-4 py-2">
+                          <span className="text-xs font-medium text-gray-400">{vRow.vendorName}</span>
+                          <span className="text-xs text-orange-400">NT$ {vRow.subtotal}</span>
+                        </div>
+                        {vRow.items.map((row, i) => (
+                          <div key={i} className="px-4 py-2 border-t border-gray-50">
                             <div className="flex justify-between">
-                              <span className="text-sm text-gray-600">{row.menuName} × {row.qty}</span>
-                              <span className="text-sm text-gray-500">NT$ {row.total}</span>
+                              <span className="text-xs text-gray-500">{row.menuName} × {row.qty}</span>
+                              <span className="text-xs text-gray-400">NT$ {row.total}</span>
                             </div>
                             {(row.sweetness || row.toppingDesc) && (
-                              <div className="text-xs text-blue-400 mt-0.5">
+                              <div className="text-xs text-blue-400 mt-0.5 ml-2">
                                 {[row.sweetness, row.ice, row.toppingDesc].filter(Boolean).join(' ')}
                               </div>
                             )}
                           </div>
                         ))}
                       </div>
-                      {sec.payment && (
-                        <label className="flex items-center justify-between px-4 py-3 border-t border-gray-100 cursor-pointer">
-                          <span className={`text-sm ${sec.payment.is_paid ? 'text-green-600 font-medium' : 'text-gray-600'}`}>
-                            {sec.payment.is_paid ? '✓ 已付款' : '未付款'}
-                          </span>
-                          <input
-                            type="checkbox"
-                            checked={sec.payment.is_paid}
-                            disabled={isCompleted}
-                            onChange={() => orderService.togglePayment(sec.payment!.id!)}
-                            className="w-5 h-5 accent-orange-500"
-                          />
-                        </label>
-                      )}
-                    </>
-                  )}
-                </div>
-              ))}
+                    ))}
+                  </div>
+                )
+              })}
               {personView.length === 0 && (
                 <p className="text-center text-gray-400 py-6 text-sm">尚無品項</p>
               )}
