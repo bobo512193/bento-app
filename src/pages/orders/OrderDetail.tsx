@@ -98,32 +98,39 @@ function buildByStore(items: OrderItem[], maps: Maps): StoreSection[] {
         if (!groups.has(key)) groups.set(key, [])
         groups.get(key)!.push(item)
       }
-      rows = Array.from(groups.values()).map(grp => {
-        const first        = grp[0]
-        const toppingExtra = first.toppings?.reduce((a, t) => a + t.price, 0) ?? 0
-        const qty          = grp.reduce((a, i) => a + i.quantity, 0)
-        return {
-          menuName: maps.menu[first.menu_id]?.name ?? '已刪除品項',
-          qty, unitPrice: first.unit_price, toppingExtra,
-          total: (first.unit_price + toppingExtra) * qty,
-          sweetness: first.sweetness ?? null,
-          ice: first.ice ?? null,
-          toppingDesc: first.toppings?.length ? first.toppings.map(t => `+${t.name}`).join(' ') : null,
-        }
-      })
+      rows = Array.from(groups.entries())
+        .sort(([keyA], [keyB]) => {
+          const idA = parseInt(keyA), idB = parseInt(keyB)
+          return idA !== idB ? idA - idB : keyA < keyB ? -1 : keyA > keyB ? 1 : 0
+        })
+        .map(([, grp]) => {
+          const first        = grp[0]
+          const toppingExtra = first.toppings?.reduce((a, t) => a + t.price, 0) ?? 0
+          const qty          = grp.reduce((a, i) => a + i.quantity, 0)
+          return {
+            menuName: maps.menu[first.menu_id]?.name ?? '已刪除品項',
+            qty, unitPrice: first.unit_price, toppingExtra,
+            total: (first.unit_price + toppingExtra) * qty,
+            sweetness: first.sweetness ?? null,
+            ice: first.ice ?? null,
+            toppingDesc: first.toppings?.length ? first.toppings.map(t => `+${t.name}`).join(' ') : null,
+          }
+        })
     } else {
-      // 便當：依品項彙總數量
+      // 便當：依品項彙總數量，按 menu_id 排序
       const byMenu = new Map<number, { qty: number; unitPrice: number }>()
       for (const item of storeItems) {
         const prev = byMenu.get(item.menu_id)
         byMenu.set(item.menu_id, { qty: (prev?.qty ?? 0) + item.quantity, unitPrice: item.unit_price })
       }
-      rows = Array.from(byMenu.entries()).map(([menuId, { qty, unitPrice }]) => ({
-        menuName: maps.menu[menuId]?.name ?? '已刪除品項',
-        qty, unitPrice, toppingExtra: 0,
-        total: qty * unitPrice,
-        sweetness: null, ice: null, toppingDesc: null,
-      }))
+      rows = Array.from(byMenu.entries())
+        .sort(([a], [b]) => a - b)
+        .map(([menuId, { qty, unitPrice }]) => ({
+          menuName: maps.menu[menuId]?.name ?? '已刪除品項',
+          qty, unitPrice, toppingExtra: 0,
+          total: qty * unitPrice,
+          sweetness: null, ice: null, toppingDesc: null,
+        }))
     }
 
     return {
