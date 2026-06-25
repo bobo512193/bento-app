@@ -14,8 +14,6 @@ export type Maps = {
 }
 
 // 依店家
-type MemberDetail = { name: string; qty: number; total: number }
-
 type ItemRow = {
   menuName: string
   qty: number
@@ -25,7 +23,6 @@ type ItemRow = {
   sweetness: string | null
   ice: string | null
   toppingDesc: string | null
-  memberDetails: MemberDetail[] | null  // 飲料店：各人員姓名 + 金額
 }
 
 type StoreSection = {
@@ -37,8 +34,16 @@ type StoreSection = {
   storeTotal: number
 }
 
-// 依廠商（純統計，無人員）
-type VendorRow = { menuName: string; qty: number; total: number }
+// 依廠商（統計，含客製化）
+type VendorRow = {
+  menuName: string
+  qty: number
+  total: number
+  sweetness: string | null
+  ice: string | null
+  toppingDesc: string | null
+  toppingExtra: number
+}
 type SimpleVendorSection = {
   vendorId: number
   vendorName: string
@@ -85,30 +90,18 @@ function buildByStore(items: OrderItem[], maps: Maps): StoreSection[] {
     let rows: ItemRow[]
 
     if (isDrink) {
-      // 飲料：相同品項+客製化合併，列出下單人名
-      const groups = new Map<string, { items: OrderItem[]; memberNames: string[] }>()
+      // 飲料：相同品項+客製化合併
+      const groups = new Map<string, OrderItem[]>()
       for (const item of storeItems) {
         const toppingKey = (item.toppings ?? []).map(t => t.topping_id).sort().join(',')
         const key = `${item.menu_id}|${item.sweetness ?? ''}|${item.ice ?? ''}|${toppingKey}`
-        if (!groups.has(key)) groups.set(key, { items: [], memberNames: [] })
-        const g = groups.get(key)!
-        g.items.push(item)
-        if (item.member_id != null) {
-          const mName = maps.member[item.member_id]?.name
-          if (mName && !g.memberNames.includes(mName)) g.memberNames.push(mName)
-        }
+        if (!groups.has(key)) groups.set(key, [])
+        groups.get(key)!.push(item)
       }
-      rows = Array.from(groups.values()).map(({ items: grp }) => {
+      rows = Array.from(groups.values()).map(grp => {
         const first        = grp[0]
         const toppingExtra = first.toppings?.reduce((a, t) => a + t.price, 0) ?? 0
         const qty          = grp.reduce((a, i) => a + i.quantity, 0)
-        const memberDetails: MemberDetail[] = grp
-          .filter(item => item.member_id != null)
-          .map(item => ({
-            name:  maps.member[item.member_id!]?.name ?? '已刪除人員',
-            qty:   item.quantity,
-            total: (item.unit_price + toppingExtra) * item.quantity,
-          }))
         return {
           menuName: maps.menu[first.menu_id]?.name ?? '已刪除品項',
           qty, unitPrice: first.unit_price, toppingExtra,
@@ -116,7 +109,6 @@ function buildByStore(items: OrderItem[], maps: Maps): StoreSection[] {
           sweetness: first.sweetness ?? null,
           ice: first.ice ?? null,
           toppingDesc: first.toppings?.length ? first.toppings.map(t => `+${t.name}`).join(' ') : null,
-          memberDetails: memberDetails.length > 0 ? memberDetails : null,
         }
       })
     } else {
@@ -130,7 +122,7 @@ function buildByStore(items: OrderItem[], maps: Maps): StoreSection[] {
         menuName: maps.menu[menuId]?.name ?? '已刪除品項',
         qty, unitPrice, toppingExtra: 0,
         total: qty * unitPrice,
-        sweetness: null, ice: null, toppingDesc: null, memberDetails: null,
+        sweetness: null, ice: null, toppingDesc: null,
       }))
     }
 
@@ -153,20 +145,27 @@ function buildByVendor(items: OrderItem[], maps: Maps): SimpleVendorSection[] {
   }
 
   return Array.from(byVendor.entries()).map(([vendorId, vendorItems]) => {
-    // 同品項數量合計（不論人員與客製化）
-    const byMenu = new Map<number, { qty: number; realTotal: number }>()
+    // 依品項 + 客製化分組合計
+    const groups = new Map<string, OrderItem[]>()
     for (const item of vendorItems) {
-      const extra = item.toppings?.reduce((a, t) => a + t.price, 0) ?? 0
-      const prev  = byMenu.get(item.menu_id)
-      byMenu.set(item.menu_id, {
-        qty:       (prev?.qty ?? 0) + item.quantity,
-        realTotal: (prev?.realTotal ?? 0) + (item.unit_price + extra) * item.quantity,
-      })
+      const toppingKey = (item.toppings ?? []).map(t => t.topping_id).sort().join(',')
+      const key = `${item.menu_id}|${item.sweetness ?? ''}|${item.ice ?? ''}|${toppingKey}`
+      if (!groups.has(key)) groups.set(key, [])
+      groups.get(key)!.push(item)
     }
-    const rows: VendorRow[] = Array.from(byMenu.entries()).map(([menuId, { qty, realTotal }]) => ({
-      menuName: maps.menu[menuId]?.name ?? '已刪除品項',
-      qty, total: realTotal,
-    }))
+    const rows: VendorRow[] = Array.from(groups.values()).map(grp => {
+      const first        = grp[0]
+      const toppingExtra = first.toppings?.reduce((a, t) => a + t.price, 0) ?? 0
+      const qty          = grp.reduce((a, i) => a + i.quantity, 0)
+      return {
+        menuName: maps.menu[first.menu_id]?.name ?? '已刪除品項',
+        qty, total: (first.unit_price + toppingExtra) * qty,
+        sweetness:   first.sweetness ?? null,
+        ice:         first.ice ?? null,
+        toppingDesc: first.toppings?.length ? first.toppings.map(t => `+${t.name}`).join(' ') : null,
+        toppingExtra,
+      }
+    })
     return {
       vendorId,
       vendorName:  maps.vendor[vendorId]?.name ?? '已刪除廠商',
@@ -468,18 +467,6 @@ export default function OrderDetail({ order, maps }: Props) {
                                 toppingDesc={row.toppingDesc} toppingExtra={row.toppingExtra}
                               />
                             )}
-                            {sec.isDrink && row.memberDetails && (
-                              <div className="mt-1 space-y-0.5">
-                                {row.memberDetails.map((d, j) => (
-                                  <div key={j} className="flex items-center justify-between">
-                                    <span className="text-xs text-gray-400">
-                                      · {d.name}{d.qty > 1 ? ` ×${d.qty}` : ''}
-                                    </span>
-                                    <span className="text-xs text-gray-400">NT$ {d.total}</span>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
                           </div>
                           <span className="text-sm text-gray-600 shrink-0">NT$ {row.total}</span>
                         </div>
@@ -505,12 +492,22 @@ export default function OrderDetail({ order, maps }: Props) {
                   </div>
                   <div className="divide-y divide-gray-50">
                     {sec.rows.map((row, i) => (
-                      <div key={i} className="px-4 py-2.5 flex items-center justify-between">
-                        <span className="text-sm text-gray-700">
-                          {row.menuName}
-                          <span className="text-gray-400 ml-1.5">× {row.qty}</span>
-                        </span>
-                        <span className="text-sm text-gray-500">NT$ {row.total}</span>
+                      <div key={i} className="px-4 py-2.5">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <span className="text-sm text-gray-700">
+                              {row.menuName}
+                              <span className="text-gray-400 ml-1.5">× {row.qty}</span>
+                            </span>
+                            {(row.sweetness || row.toppingDesc) && (
+                              <DrinkMeta
+                                sweetness={row.sweetness} ice={row.ice}
+                                toppingDesc={row.toppingDesc} toppingExtra={row.toppingExtra}
+                              />
+                            )}
+                          </div>
+                          <span className="text-sm text-gray-500 shrink-0">NT$ {row.total}</span>
+                        </div>
                       </div>
                     ))}
                   </div>
