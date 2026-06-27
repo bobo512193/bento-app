@@ -49,6 +49,10 @@ export default function CreateOrderPage() {
   const [showMismatch, setShowMismatch] = useState(false)
   const [mismatchText, setMismatchText] = useState('')
 
+  const [activeMemberId, setActiveMemberId] = useState<number | null>(null)
+  const [searchText, setSearchText] = useState('')
+  const [collapsedStores, setCollapsedStores] = useState<Set<number>>(new Set())
+
   useEffect(() => {
     vendorService.getActive().then(setVendors)
   }, [])
@@ -80,6 +84,9 @@ export default function CreateOrderPage() {
     setStoreToppings(Object.fromEntries(toppingsEntries))
     setMembers(activeMembers)
     setStores(storesWithMenus)
+    setActiveMemberId(activeMembers[0]?.id ?? null)
+    setSearchText('')
+    setCollapsedStores(new Set(storesWithMenus.map(s => s.id!)))
     setStep('items')
   }
 
@@ -252,10 +259,26 @@ export default function CreateOrderPage() {
   // ════════════════════════════════════════════════════════
   // Step 2：選品項
   // ════════════════════════════════════════════════════════
-  const hasMember = members.length > 0
-  const total     = totalQty()
-  const ref       = referenceCount()
-  const mismatch  = ref > 0 && total > 0 && total !== ref
+  const hasMember       = members.length > 0
+  const total           = totalQty()
+  const ref             = referenceCount()
+  const mismatch        = ref > 0 && total > 0 && total !== ref
+  const currentMemberId = hasMember ? (activeMemberId ?? undefined) : undefined
+
+  const displayStores = searchText
+    ? stores
+        .map(s => ({ ...s, menus: s.menus.filter(m => m.name.includes(searchText)) }))
+        .filter(s => s.menus.length > 0)
+    : stores
+
+  const isCollapsed    = (sid: number) => !searchText && collapsedStores.has(sid)
+  const toggleCollapse = (sid: number) =>
+    setCollapsedStores(prev => {
+      const next = new Set(prev)
+      if (next.has(sid)) next.delete(sid)
+      else next.add(sid)
+      return next
+    })
 
   return (
     <div>
@@ -265,29 +288,73 @@ export default function CreateOrderPage() {
         onBack={() => setStep('select')}
       />
 
+      {/* 人員 Tab */}
+      {hasMember && (
+        <div className="flex overflow-x-auto border-b border-gray-200 bg-white">
+          {members.map(m => {
+            const mQty = Object.values(memberOrders[m.id!] ?? {}).reduce((a, s) => a + s.qty, 0)
+            return (
+              <button
+                key={m.id}
+                onClick={() => setActiveMemberId(m.id!)}
+                className={`shrink-0 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+                  activeMemberId === m.id
+                    ? 'text-orange-500 border-orange-500'
+                    : 'text-gray-500 border-transparent'
+                }`}
+              >
+                {m.name}
+                {mQty > 0 && (
+                  <span className="ml-1.5 text-xs bg-orange-100 text-orange-500 rounded-full px-1.5 py-0.5 font-semibold">
+                    {mQty}
+                  </span>
+                )}
+              </button>
+            )
+          })}
+        </div>
+      )}
+
+      {/* 搜尋框 */}
+      <div className="px-4 py-2 bg-white border-b border-gray-100">
+        <input
+          type="text"
+          placeholder="搜尋品項..."
+          value={searchText}
+          onChange={e => setSearchText(e.target.value)}
+          className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-orange-400 bg-gray-50"
+        />
+      </div>
+
       {/* 菜單列表 */}
-      <div className="p-4 space-y-4 pb-36">
-        {stores.map(store => {
+      <div className="pb-36">
+        {displayStores.map(store => {
           const isDrink    = (store.type ?? 'bento') === 'drink'
           const storeTopps = storeToppings[store.id!] ?? []
+          const collapsed  = isCollapsed(store.id!)
 
           return (
             <div key={store.id}>
-              <div className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-1.5">
-                {isDrink ? '🧋' : '🍱'} {store.name}
-              </div>
-              <div className="space-y-2">
-                {store.menus.map(menu => {
+              {/* 店家標題（可收折） */}
+              <button
+                onClick={() => toggleCollapse(store.id!)}
+                className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-100 active:bg-gray-100"
+              >
+                <span className="text-sm font-semibold text-gray-700">
+                  {isDrink ? '🧋' : '🍱'} {store.name}
+                </span>
+                <span className="text-gray-400 text-sm">{collapsed ? '▸' : '▾'}</span>
+              </button>
 
-                  // ── 有人員：品項下方列出各人員 +/- ─────────────
-                  if (hasMember) {
-                    const memberTotal = members.reduce(
-                      (a, m) => a + (memberOrders[m.id!]?.[menu.id!]?.qty ?? 0), 0
-                    )
+              {/* 品項列表 */}
+              {!collapsed && (
+                <div className="space-y-2 p-3">
+                  {store.menus.map(menu => {
+                    const itemState = getItemState(menu.id!, currentMemberId)
+                    const qty       = itemState.qty
                     return (
                       <div key={menu.id} className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-                        {/* 品項標題列 */}
-                        <div className="px-3 py-3 flex items-center gap-3">
+                        <div className="p-3 flex items-center gap-3">
                           {menu.image_base64 ? (
                             <img src={menu.image_base64} alt={menu.name} className="w-10 h-10 rounded-lg object-cover shrink-0" />
                           ) : (
@@ -299,182 +366,80 @@ export default function CreateOrderPage() {
                             <div className="text-sm font-medium text-gray-800 truncate">{menu.name}</div>
                             <div className="text-xs text-orange-500">NT$ {menu.price}</div>
                           </div>
-                          {memberTotal > 0 && (
-                            <span className="text-sm font-semibold text-orange-500 shrink-0">× {memberTotal}</span>
-                          )}
+                          <QuantityControl
+                            value={qty}
+                            onChange={q => setQty(menu.id!, q, currentMemberId)}
+                          />
                         </div>
-
-                        {/* 各人員 +/- 數量 */}
-                        <div className="border-t border-gray-100 divide-y divide-gray-50">
-                          {members.map(member => {
-                            const itemState = getItemState(menu.id!, member.id!)
-                            const qty       = itemState.qty
-                            return (
-                              <div key={member.id}>
-                                <div className="px-3 py-2.5 flex items-center justify-between">
-                                  <span className={`text-sm ${qty > 0 ? 'text-gray-800 font-medium' : 'text-gray-400'}`}>
-                                    {member.name}
-                                  </span>
-                                  <QuantityControl
-                                    value={qty}
-                                    onChange={q => setQty(menu.id!, q, member.id!)}
-                                  />
-                                </div>
-
-                                {/* 飲料客製化（qty > 0 時展開） */}
-                                {qty > 0 && isDrink && (
-                                  <div className="px-3 pb-2.5 pt-1 space-y-1.5 bg-gray-50">
-                                    <div className="flex flex-wrap items-center gap-1.5">
-                                      <span className="text-xs text-gray-400 w-8 shrink-0">甜度</span>
-                                      {SWEETNESS_OPTIONS.map(opt => (
-                                        <button
-                                          key={opt}
-                                          onClick={() => setSweetness(menu.id!, opt, member.id!)}
-                                          className={`px-2.5 py-0.5 text-xs rounded-full border transition-colors ${
-                                            itemState.sweetness === opt
-                                              ? 'border-orange-500 bg-orange-50 text-orange-600'
-                                              : 'border-gray-200 bg-white text-gray-500'
-                                          }`}
-                                        >
-                                          {opt}
-                                        </button>
-                                      ))}
-                                    </div>
-                                    <div className="flex flex-wrap items-center gap-1.5">
-                                      <span className="text-xs text-gray-400 w-8 shrink-0">冰塊</span>
-                                      {ICE_OPTIONS.map(opt => (
-                                        <button
-                                          key={opt}
-                                          onClick={() => setIce(menu.id!, opt, member.id!)}
-                                          className={`px-2.5 py-0.5 text-xs rounded-full border transition-colors ${
-                                            itemState.ice === opt
-                                              ? 'border-orange-500 bg-orange-50 text-orange-600'
-                                              : 'border-gray-200 bg-white text-gray-500'
-                                          }`}
-                                        >
-                                          {opt}
-                                        </button>
-                                      ))}
-                                    </div>
-                                    {storeTopps.length > 0 && (
-                                      <div className="flex flex-wrap items-center gap-1.5">
-                                        <span className="text-xs text-gray-400 w-8 shrink-0">加料</span>
-                                        {storeTopps.map(topping => {
-                                          const selected = itemState.toppingIds.includes(topping.id!)
-                                          return (
-                                            <button
-                                              key={topping.id}
-                                              onClick={() => toggleTopping(menu.id!, topping.id!, member.id!)}
-                                              className={`px-2.5 py-0.5 text-xs rounded-full border transition-colors ${
-                                                selected
-                                                  ? 'border-orange-500 bg-orange-50 text-orange-600'
-                                                  : 'border-gray-200 bg-white text-gray-500'
-                                              }`}
-                                            >
-                                              {topping.name} +{topping.price}
-                                            </button>
-                                          )
-                                        })}
-                                      </div>
-                                    )}
-                                  </div>
-                                )}
+                        {qty > 0 && isDrink && (
+                          <div className="px-3 pb-3 pt-1 space-y-2 border-t border-gray-100 bg-gray-50">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="text-xs text-gray-400 w-8 shrink-0">甜度</span>
+                              {SWEETNESS_OPTIONS.map(opt => (
+                                <button
+                                  key={opt}
+                                  onClick={() => setSweetness(menu.id!, opt, currentMemberId)}
+                                  className={`px-2.5 py-1 text-xs rounded-full border transition-colors ${
+                                    itemState.sweetness === opt
+                                      ? 'border-orange-500 bg-orange-50 text-orange-600'
+                                      : 'border-gray-200 bg-white text-gray-500'
+                                  }`}
+                                >
+                                  {opt}
+                                </button>
+                              ))}
+                            </div>
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="text-xs text-gray-400 w-8 shrink-0">冰塊</span>
+                              {ICE_OPTIONS.map(opt => (
+                                <button
+                                  key={opt}
+                                  onClick={() => setIce(menu.id!, opt, currentMemberId)}
+                                  className={`px-2.5 py-1 text-xs rounded-full border transition-colors ${
+                                    itemState.ice === opt
+                                      ? 'border-orange-500 bg-orange-50 text-orange-600'
+                                      : 'border-gray-200 bg-white text-gray-500'
+                                  }`}
+                                >
+                                  {opt}
+                                </button>
+                              ))}
+                            </div>
+                            {storeTopps.length > 0 && (
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <span className="text-xs text-gray-400 w-8 shrink-0">加料</span>
+                                {storeTopps.map(topping => {
+                                  const selected = itemState.toppingIds.includes(topping.id!)
+                                  return (
+                                    <button
+                                      key={topping.id}
+                                      onClick={() => toggleTopping(menu.id!, topping.id!, currentMemberId)}
+                                      className={`px-2.5 py-1 text-xs rounded-full border transition-colors ${
+                                        selected
+                                          ? 'border-orange-500 bg-orange-50 text-orange-600'
+                                          : 'border-gray-200 bg-white text-gray-500'
+                                      }`}
+                                    >
+                                      {topping.name} +{topping.price}
+                                    </button>
+                                  )
+                                })}
                               </div>
-                            )
-                          })}
-                        </div>
-                      </div>
-                    )
-                  }
-
-                  // ── 無人員：單一 +/- 數量 ─────────────────────
-                  const itemState = getItemState(menu.id!)
-                  const qty       = itemState.qty
-                  return (
-                    <div key={menu.id} className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-                      <div className="p-3 flex items-center gap-3">
-                        {menu.image_base64 ? (
-                          <img src={menu.image_base64} alt={menu.name} className="w-10 h-10 rounded-lg object-cover shrink-0" />
-                        ) : (
-                          <div className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center text-xl shrink-0">
-                            {isDrink ? '🧋' : '🍱'}
+                            )}
                           </div>
                         )}
-                        <div className="flex-1 min-w-0">
-                          <div className="text-sm font-medium text-gray-800 truncate">{menu.name}</div>
-                          <div className="text-xs text-orange-500">NT$ {menu.price}</div>
-                        </div>
-                        <QuantityControl
-                          value={qty}
-                          onChange={q => setQty(menu.id!, q)}
-                        />
                       </div>
-                      {qty > 0 && isDrink && (
-                        <div className="px-3 pb-3 pt-1 space-y-2 border-t border-gray-100 bg-gray-50">
-                          <div className="flex flex-wrap items-center gap-1.5">
-                            <span className="text-xs text-gray-400 w-8 shrink-0">甜度</span>
-                            {SWEETNESS_OPTIONS.map(opt => (
-                              <button
-                                key={opt}
-                                onClick={() => setSweetness(menu.id!, opt)}
-                                className={`px-2.5 py-1 text-xs rounded-full border transition-colors ${
-                                  itemState.sweetness === opt
-                                    ? 'border-orange-500 bg-orange-50 text-orange-600'
-                                    : 'border-gray-200 bg-white text-gray-500'
-                                }`}
-                              >
-                                {opt}
-                              </button>
-                            ))}
-                          </div>
-                          <div className="flex flex-wrap items-center gap-1.5">
-                            <span className="text-xs text-gray-400 w-8 shrink-0">冰塊</span>
-                            {ICE_OPTIONS.map(opt => (
-                              <button
-                                key={opt}
-                                onClick={() => setIce(menu.id!, opt)}
-                                className={`px-2.5 py-1 text-xs rounded-full border transition-colors ${
-                                  itemState.ice === opt
-                                    ? 'border-orange-500 bg-orange-50 text-orange-600'
-                                    : 'border-gray-200 bg-white text-gray-500'
-                                }`}
-                              >
-                                {opt}
-                              </button>
-                            ))}
-                          </div>
-                          {storeTopps.length > 0 && (
-                            <div className="flex flex-wrap items-center gap-1.5">
-                              <span className="text-xs text-gray-400 w-8 shrink-0">加料</span>
-                              {storeTopps.map(topping => {
-                                const selected = itemState.toppingIds.includes(topping.id!)
-                                return (
-                                  <button
-                                    key={topping.id}
-                                    onClick={() => toggleTopping(menu.id!, topping.id!)}
-                                    className={`px-2.5 py-1 text-xs rounded-full border transition-colors ${
-                                      selected
-                                        ? 'border-orange-500 bg-orange-50 text-orange-600'
-                                        : 'border-gray-200 bg-white text-gray-500'
-                                    }`}
-                                  >
-                                    {topping.name} +{topping.price}
-                                  </button>
-                                )
-                              })}
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
+                    )
+                  })}
+                </div>
+              )}
             </div>
           )
         })}
-        {stores.length === 0 && (
-          <p className="text-center text-gray-400 py-16 text-sm">尚無可訂餐的店家菜單</p>
+        {displayStores.length === 0 && (
+          <p className="text-center text-gray-400 py-16 text-sm">
+            {searchText ? '找不到符合的品項' : '尚無可訂餐的店家菜單'}
+          </p>
         )}
       </div>
 
