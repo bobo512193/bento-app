@@ -133,6 +133,24 @@ export default function CreateOrderPage() {
   const referenceCount = (): number =>
     members.length > 0 ? members.length : (vendor?.headcount ?? 0)
 
+  // ── 分類統計（便當 / 飲料） ───────────────────────────────
+  const getTypeTotals = (): { bento: number; drink: number } => {
+    const menuTypeMap = new Map<number, 'bento' | 'drink'>()
+    for (const store of stores) {
+      const t = (store.type ?? 'bento') as 'bento' | 'drink'
+      for (const menu of store.menus) menuTypeMap.set(menu.id!, t)
+    }
+    const entries = members.length > 0
+      ? Object.values(memberOrders).flatMap(o => Object.entries(o))
+      : Object.entries(vendorOrders)
+    const result = { bento: 0, drink: 0 }
+    for (const [menuIdStr, state] of entries) {
+      const t = menuTypeMap.get(Number(menuIdStr))
+      if (t) result[t] += state.qty
+    }
+    return result
+  }
+
   // ── 找 menu 物件 ─────────────────────────────────────────
   const findMenu = (menuId: number): Menu => {
     for (const store of stores) {
@@ -197,13 +215,18 @@ export default function CreateOrderPage() {
 
   // ── 送出前檢查 ────────────────────────────────────────────
   const handleSubmit = () => {
-    const total = totalQty()
-    if (total === 0) return
+    if (totalQty() === 0) return
     const ref = referenceCount()
-    if (ref > 0 && total !== ref) {
-      setMismatchText(`目前點餐 ${total} 份，與實際人數 ${ref} 人不符，是否繼續訂餐？`)
-      setShowMismatch(true)
-      return
+    if (ref > 0) {
+      const { bento, drink } = getTypeTotals()
+      const parts: string[] = []
+      if (bento > 0 && bento !== ref) parts.push(`便當 ${bento} 個`)
+      if (drink > 0 && drink !== ref) parts.push(`飲料 ${drink} 杯`)
+      if (parts.length > 0) {
+        setMismatchText(`${parts.join('、')}與實際人數 ${ref} 人不符，是否繼續訂餐？`)
+        setShowMismatch(true)
+        return
+      }
     }
     doCreateOrder()
   }
@@ -262,8 +285,12 @@ export default function CreateOrderPage() {
   const hasMember       = members.length > 0
   const total           = totalQty()
   const ref             = referenceCount()
-  const mismatch        = ref > 0 && total > 0 && total !== ref
   const currentMemberId = hasMember ? (activeMemberId ?? undefined) : undefined
+  const { bento: bentoTotal, drink: drinkTotal } = getTypeTotals()
+  const mismatch = ref > 0 && (
+    (bentoTotal > 0 && bentoTotal !== ref) ||
+    (drinkTotal > 0 && drinkTotal !== ref)
+  )
 
   const displayStores = searchText
     ? stores
