@@ -49,6 +49,7 @@ type SimpleVendorSection = {
   vendorName: string
   vendorTotal: number
   rows: VendorRow[]
+  vendorPayments: OrderPayment[]
 }
 
 // 依人名
@@ -72,6 +73,8 @@ type PersonVendorRow = {
 
 type PersonFullSection = {
   memberId: number | null
+  vendorId: number | null  // set only for vendor-direct sections (memberId == null)
+  sectionKey: string
   memberName: string
   vendorRows: PersonVendorRow[]
   memberTotal: number
@@ -147,7 +150,7 @@ function buildByStore(items: OrderItem[], maps: Maps): StoreSection[] {
   })
 }
 
-function buildByVendor(items: OrderItem[], maps: Maps): SimpleVendorSection[] {
+function buildByVendor(items: OrderItem[], payments: OrderPayment[], maps: Maps): SimpleVendorSection[] {
   const byVendor = new Map<number, OrderItem[]>()
   for (const item of items) {
     if (!byVendor.has(item.vendor_id)) byVendor.set(item.vendor_id, [])
@@ -181,18 +184,12 @@ function buildByVendor(items: OrderItem[], maps: Maps): SimpleVendorSection[] {
       vendorName:  maps.vendor[vendorId]?.name ?? '已刪除廠商',
       vendorTotal: rows.reduce((a, r) => a + r.total, 0),
       rows,
+      vendorPayments: payments.filter(p => p.vendor_id === vendorId),
     }
   })
 }
 
 function buildByPerson(items: OrderItem[], payments: OrderPayment[], maps: Maps): PersonFullSection[] {
-  const byMember = new Map<number | null, OrderItem[]>()
-  for (const item of items) {
-    const key = item.member_id ?? null
-    if (!byMember.has(key)) byMember.set(key, [])
-    byMember.get(key)!.push(item)
-  }
-
   const toRow = (item: OrderItem): PersonRow => {
     const toppingExtra = item.toppings?.reduce((a, t) => a + t.price, 0) ?? 0
     return {
@@ -205,38 +202,58 @@ function buildByPerson(items: OrderItem[], payments: OrderPayment[], maps: Maps)
     }
   }
 
-  return Array.from(byMember.entries()).map(([memberId, memberItems]) => {
+  const sections: PersonFullSection[] = []
+
+  // 有綁定人員的品項：按人員分組
+  const byMember = new Map<number, OrderItem[]>()
+  for (const item of items) {
+    if (item.member_id == null) continue
+    if (!byMember.has(item.member_id)) byMember.set(item.member_id, [])
+    byMember.get(item.member_id)!.push(item)
+  }
+  for (const [memberId, memberItems] of byMember.entries()) {
     const byVendor = new Map<number, OrderItem[]>()
     for (const item of memberItems) {
       if (!byVendor.has(item.vendor_id)) byVendor.set(item.vendor_id, [])
       byVendor.get(item.vendor_id)!.push(item)
     }
-
     const vendorRows: PersonVendorRow[] = Array.from(byVendor.entries()).map(([vendorId, vItems]) => {
       const rows = vItems.map(toRow)
-      return {
-        vendorId,
-        vendorName: maps.vendor[vendorId]?.name ?? '已刪除廠商',
-        items: rows,
-        subtotal: rows.reduce((a, r) => a + r.total, 0),
-      }
+      return { vendorId, vendorName: maps.vendor[vendorId]?.name ?? '已刪除廠商', items: rows, subtotal: rows.reduce((a, r) => a + r.total, 0) }
     })
-
-    const memberTotal = vendorRows.reduce((a, v) => a + v.subtotal, 0)
-    const memberPayments = memberId != null
-      ? payments.filter(p => p.member_id === memberId)
-      : payments.filter(p => p.member_id == null)
-
-    return {
+    sections.push({
       memberId,
-      memberName: memberId != null
-        ? (maps.member[memberId]?.name ?? '已刪除人員')
-        : '廠商訂購',
+      vendorId: null,
+      sectionKey: `m:${memberId}`,
+      memberName: maps.member[memberId]?.name ?? '已刪除人員',
       vendorRows,
-      memberTotal,
-      memberPayments,
-    }
-  })
+      memberTotal: vendorRows.reduce((a, v) => a + v.subtotal, 0),
+      memberPayments: payments.filter(p => p.member_id === memberId),
+    })
+  }
+
+  // 未綁定人員（廠商直接訂購）：按廠商分組，每廠商獨立一個 section
+  const byVendorDirect = new Map<number, OrderItem[]>()
+  for (const item of items) {
+    if (item.member_id != null) continue
+    if (!byVendorDirect.has(item.vendor_id)) byVendorDirect.set(item.vendor_id, [])
+    byVendorDirect.get(item.vendor_id)!.push(item)
+  }
+  for (const [vendorId, vItems] of byVendorDirect.entries()) {
+    const rows = vItems.map(toRow)
+    const subtotal = rows.reduce((a, r) => a + r.total, 0)
+    sections.push({
+      memberId: null,
+      vendorId,
+      sectionKey: `v:${vendorId}`,
+      memberName: maps.vendor[vendorId]?.name ?? '已刪除廠商',
+      vendorRows: [{ vendorId, vendorName: maps.vendor[vendorId]?.name ?? '已刪除廠商', items: rows, subtotal }],
+      memberTotal: subtotal,
+      memberPayments: payments.filter(p => p.vendor_id === vendorId && p.member_id == null),
+    })
+  }
+
+  return sections
 }
 
 // ── 子元件 ───────────────────────────────────────────────────
@@ -307,7 +324,7 @@ export default function OrderDetail({ order, maps }: Props) {
 
   const { items, payments } = detail
   const storeView   = buildByStore(items, maps)
-  const vendorView  = buildByVendor(items, maps)
+  const vendorView  = buildByVendor(items, payments, maps)
   const personView  = buildByPerson(items, payments, maps)
   const allPaid     = payments.length > 0 && payments.every(p => p.is_paid)
   const isCompleted = order.status === 'completed'
@@ -495,11 +512,28 @@ export default function OrderDetail({ order, maps }: Props) {
           {/* ── 依廠商（純統計，同品項合計） ────────────────────── */}
           {activeTab === 'vendor' && (
             <div className="p-4 space-y-3">
-              {vendorView.map(sec => (
+              {vendorView.map(sec => {
+                const vendorAllPaid = sec.vendorPayments.length > 0 && sec.vendorPayments.every(p => p.is_paid)
+                return (
                 <div key={sec.vendorId} className="bg-white rounded-xl border border-gray-100 overflow-hidden">
                   <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-100">
                     <span className="text-sm font-semibold text-gray-700">{sec.vendorName}</span>
-                    <span className="text-sm font-semibold text-orange-500">NT$ {sec.vendorTotal}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-semibold text-orange-500">NT$ {sec.vendorTotal}</span>
+                      {!isCompleted && sec.vendorPayments.length > 0 && (
+                        <label className="flex items-center gap-1.5 cursor-pointer">
+                          <span className={`text-xs ${vendorAllPaid ? 'text-green-600 font-medium' : 'text-gray-400'}`}>
+                            {vendorAllPaid ? '已付' : '未付'}
+                          </span>
+                          <input
+                            type="checkbox"
+                            checked={vendorAllPaid}
+                            onChange={() => orderService.setVendorPayments(order.id!, sec.vendorId, !vendorAllPaid)}
+                            className="w-5 h-5 accent-orange-500"
+                          />
+                        </label>
+                      )}
+                    </div>
                   </div>
                   <div className="divide-y divide-gray-50">
                     {sec.rows.map((row, i) => (
@@ -523,7 +557,7 @@ export default function OrderDetail({ order, maps }: Props) {
                     ))}
                   </div>
                 </div>
-              ))}
+              )})}
               {vendorView.length === 0 && (
                 <p className="text-center text-gray-400 py-6 text-sm">尚無品項</p>
               )}
@@ -536,7 +570,7 @@ export default function OrderDetail({ order, maps }: Props) {
               {personView.map(sec => {
                 const memberAllPaid = sec.memberPayments.length > 0 && sec.memberPayments.every(p => p.is_paid)
                 return (
-                  <div key={sec.memberId ?? 'null'} className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+                  <div key={sec.sectionKey} className="bg-white rounded-xl border border-gray-100 overflow-hidden">
                     {/* 人員標題 + 付款 toggle */}
                     <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-100">
                       <span className="text-sm font-semibold text-gray-700">{sec.memberName}</span>
@@ -551,7 +585,10 @@ export default function OrderDetail({ order, maps }: Props) {
                               type="checkbox"
                               checked={memberAllPaid}
                               disabled={isCompleted}
-                              onChange={() => orderService.setMemberPayments(order.id!, sec.memberId, !memberAllPaid)}
+                              onChange={() => sec.memberId != null
+                                ? orderService.setMemberPayments(order.id!, sec.memberId, !memberAllPaid)
+                                : orderService.setVendorPayments(order.id!, sec.vendorId!, !memberAllPaid)
+                              }
                               className="w-5 h-5 accent-orange-500"
                             />
                           </label>
@@ -561,10 +598,12 @@ export default function OrderDetail({ order, maps }: Props) {
                     {/* 廠商明細 */}
                     {sec.vendorRows.map((vRow, vi) => (
                       <div key={vRow.vendorId} className={vi > 0 ? 'border-t border-gray-100' : ''}>
-                        <div className="flex items-center justify-between px-4 py-2">
-                          <span className="text-xs font-medium text-gray-400">{vRow.vendorName}</span>
-                          <span className="text-xs text-orange-400">NT$ {vRow.subtotal}</span>
-                        </div>
+                        {sec.memberId != null && (
+                          <div className="flex items-center justify-between px-4 py-2">
+                            <span className="text-xs font-medium text-gray-400">{vRow.vendorName}</span>
+                            <span className="text-xs text-orange-400">NT$ {vRow.subtotal}</span>
+                          </div>
+                        )}
                         {vRow.items.map((row, i) => (
                           <div key={i} className="px-4 py-2 border-t border-gray-50">
                             <div className="flex justify-between">

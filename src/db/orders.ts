@@ -88,6 +88,15 @@ export const orderService = {
     )
   },
 
+  setVendorPayments: async (order_id: number, vendor_id: number, is_paid: boolean) => {
+    const all = await db.order_payments.where('order_id').equals(order_id).toArray()
+    await Promise.all(
+      all
+        .filter(p => p.vendor_id === vendor_id)
+        .map(p => db.order_payments.update(p.id!, { is_paid }))
+    )
+  },
+
   // ── 刪除（訂單管理清除用） ───────────────────────────────
 
   deleteByDates: async (dates: string[]) => {
