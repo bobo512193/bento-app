@@ -15,10 +15,11 @@ type ItemState = {
   sweetness: string
   ice: string
   toppingIds: number[]
+  halfRice: boolean
 }
 
 function defaultItemState(): ItemState {
-  return { qty: 0, sweetness: '半糖', ice: '少冰', toppingIds: [] }
+  return { qty: 0, sweetness: '半糖', ice: '少冰', toppingIds: [], halfRice: false }
 }
 
 function getTodayStr() {
@@ -77,9 +78,8 @@ export default function CreateOrderPage() {
       )
     ).filter(s => s.menus.length > 0)
 
-    const drinkStores = storesWithMenus.filter(s => (s.type ?? 'bento') === 'drink')
     const toppingsEntries = await Promise.all(
-      drinkStores.map(async s => [s.id!, await toppingService.getByStore(s.id!)] as const)
+      storesWithMenus.map(async s => [s.id!, await toppingService.getByStore(s.id!)] as const)
     )
     setStoreToppings(Object.fromEntries(toppingsEntries))
     setMembers(activeMembers)
@@ -122,6 +122,8 @@ export default function CreateOrderPage() {
       : [...cur.toppingIds, toppingId]
     updateItemState(menuId, { ...cur, toppingIds: ids }, memberId)
   }
+  const setHalfRice = (menuId: number, val: boolean, memberId?: number) =>
+    updateItemState(menuId, { ...getItemState(menuId, memberId), halfRice: val }, memberId)
 
   // ── 數量統計 ──────────────────────────────────────────────
   const totalQty = (): number => {
@@ -172,12 +174,16 @@ export default function CreateOrderPage() {
       const menu  = findMenu(menuId)
       const store = stores.find(s => s.id === menu.store_id)
       const isDrink = (store?.type ?? 'bento') === 'drink'
-      const toppingList = isDrink && itemState.toppingIds.length > 0
-        ? itemState.toppingIds
-            .map(tid => (storeToppings[menu.store_id] ?? []).find(t => t.id === tid))
-            .filter((t): t is Topping => !!t && t.id != null)
-            .map(t => ({ topping_id: t.id!, name: t.name, price: t.price }))
-        : null
+      const selectedToppings = itemState.toppingIds
+        .map(tid => (storeToppings[menu.store_id] ?? []).find(t => t.id === tid))
+        .filter((t): t is Topping => !!t && t.id != null)
+        .map(t => ({ topping_id: t.id!, name: t.name, price: t.price }))
+      const halfRiceEntry = !isDrink && itemState.halfRice
+        ? [{ topping_id: 0, name: '半飯', price: 0 }]
+        : []
+      const toppingList = isDrink
+        ? (selectedToppings.length > 0 ? selectedToppings : null)
+        : (halfRiceEntry.length > 0 || selectedToppings.length > 0 ? [...halfRiceEntry, ...selectedToppings] : null)
       return {
         order_id:   orderId,
         store_id:   menu.store_id,
@@ -448,6 +454,44 @@ export default function CreateOrderPage() {
                                       }`}
                                     >
                                       {topping.name} +{topping.price}
+                                    </button>
+                                  )
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        {qty > 0 && !isDrink && (
+                          <div className="px-3 pb-3 pt-1 space-y-2 border-t border-gray-100 bg-gray-50">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="text-xs text-gray-400 w-8 shrink-0">選項</span>
+                              <button
+                                onClick={() => setHalfRice(menu.id!, !itemState.halfRice, currentMemberId)}
+                                className={`px-2.5 py-1 text-xs rounded-full border transition-colors ${
+                                  itemState.halfRice
+                                    ? 'border-orange-500 bg-orange-50 text-orange-600'
+                                    : 'border-gray-200 bg-white text-gray-500'
+                                }`}
+                              >
+                                半飯
+                              </button>
+                            </div>
+                            {storeTopps.length > 0 && (
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <span className="text-xs text-gray-400 w-8 shrink-0">加料</span>
+                                {storeTopps.map(topping => {
+                                  const selected = itemState.toppingIds.includes(topping.id!)
+                                  return (
+                                    <button
+                                      key={topping.id}
+                                      onClick={() => toggleTopping(menu.id!, topping.id!, currentMemberId)}
+                                      className={`px-2.5 py-1 text-xs rounded-full border transition-colors ${
+                                        selected
+                                          ? 'border-orange-500 bg-orange-50 text-orange-600'
+                                          : 'border-gray-200 bg-white text-gray-500'
+                                      }`}
+                                    >
+                                      {topping.name}{topping.price > 0 ? ` +${topping.price}` : ''}
                                     </button>
                                   )
                                 })}

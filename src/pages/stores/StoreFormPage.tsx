@@ -128,13 +128,13 @@ export default function StoreFormPage() {
           <Toggle value={is_active} onChange={setActive} />
         </div>
 
-        {/* 飲料店家：加料管理入口 */}
-        {isEdit && type === 'drink' && (
+        {/* 管理加料入口 */}
+        {isEdit && (
           <Link
             to={`/management/stores/${id}/toppings`}
             className="flex items-center justify-between w-full py-3 px-4 bg-blue-50 rounded-xl border border-blue-100 text-sm text-blue-600"
           >
-            <span>🧋 管理加料選項</span>
+            <span>{type === 'drink' ? '🧋' : '🍱'} 管理加料選項</span>
             <span className="text-blue-300">›</span>
           </Link>
         )}

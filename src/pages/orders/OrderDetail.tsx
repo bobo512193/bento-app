@@ -123,19 +123,27 @@ function buildByStore(items: OrderItem[], maps: Maps): StoreSection[] {
           }
         })
     } else {
-      // 便當：依品項彙總數量，按 menu_id 排序
-      const byMenu = new Map<number, { qty: number; unitPrice: number }>()
+      // 便當：依品項+加料分組，按 menu_id 排序
+      const byKey = new Map<string, { menuId: number; qty: number; unitPrice: number; toppingDesc: string | null; toppingExtra: number }>()
       for (const item of storeItems) {
-        const prev = byMenu.get(item.menu_id)
-        byMenu.set(item.menu_id, { qty: (prev?.qty ?? 0) + item.quantity, unitPrice: item.unit_price })
+        const toppingKey = (item.toppings ?? []).map(t => t.topping_id).sort().join(',')
+        const key = `${item.menu_id}|${toppingKey}`
+        const toppingExtra = item.toppings?.reduce((a, t) => a + t.price, 0) ?? 0
+        const toppingDesc = item.toppings?.length ? item.toppings.map(t => `+${t.name}`).join(' ') : null
+        const prev = byKey.get(key)
+        if (prev) {
+          byKey.set(key, { ...prev, qty: prev.qty + item.quantity })
+        } else {
+          byKey.set(key, { menuId: item.menu_id, qty: item.quantity, unitPrice: item.unit_price, toppingDesc, toppingExtra })
+        }
       }
-      rows = Array.from(byMenu.entries())
-        .sort(([a], [b]) => a - b)
-        .map(([menuId, { qty, unitPrice }]) => ({
+      rows = Array.from(byKey.values())
+        .sort((a, b) => a.menuId - b.menuId)
+        .map(({ menuId, qty, unitPrice, toppingDesc, toppingExtra }) => ({
           menuName: maps.menu[menuId]?.name ?? '已刪除品項',
-          qty, unitPrice, toppingExtra: 0,
-          total: qty * unitPrice,
-          sweetness: null, ice: null, toppingDesc: null,
+          qty, unitPrice, toppingExtra,
+          total: (unitPrice + toppingExtra) * qty,
+          sweetness: null, ice: null, toppingDesc,
         }))
     }
 
@@ -489,7 +497,7 @@ export default function OrderDetail({ order, maps }: Props) {
                               {row.menuName}
                               <span className="text-gray-400 ml-1.5">× {row.qty}</span>
                             </span>
-                            {sec.isDrink && (
+                            {(sec.isDrink || !!row.toppingDesc) && (
                               <DrinkMeta
                                 sweetness={row.sweetness} ice={row.ice}
                                 toppingDesc={row.toppingDesc} toppingExtra={row.toppingExtra}
