@@ -42,6 +42,18 @@ export default function MemberFormPage() {
     if (vendorId === '') errs.vendor = true
     if (Object.keys(errs).length) { setErrors(errs); return }
 
+    if (!isEdit) {
+      const vid = Number(vendorId)
+      const [vendor, existingMembers] = await Promise.all([
+        vendorService.getById(vid),
+        memberService.getByVendor(vid),
+      ])
+      if (vendor && existingMembers.length === 0 && (vendor.balance ?? 0) !== 0) {
+        alert('此廠商尚有餘額，請先提領後再新增人員')
+        return
+      }
+    }
+
     const data = {
       vendor_id: Number(vendorId),
       name: name.trim(),
@@ -58,8 +70,13 @@ export default function MemberFormPage() {
   }
 
   const handleDelete = async () => {
-    await memberService.remove(Number(id))
-    navigate('/management/members', { replace: true })
+    try {
+      await memberService.remove(Number(id))
+      navigate('/management/members', { replace: true })
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : '無法刪除人員')
+      setShowConfirmDelete(false)
+    }
   }
 
   return (

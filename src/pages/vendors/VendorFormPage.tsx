@@ -45,8 +45,13 @@ export default function VendorFormPage() {
   }
 
   const handleDelete = async () => {
-    await vendorService.remove(Number(id))
-    navigate('/management/vendors', { replace: true })
+    try {
+      await vendorService.remove(Number(id))
+      navigate('/management/vendors', { replace: true })
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : '無法刪除廠商')
+      setShowConfirmDelete(false)
+    }
   }
 
   return (

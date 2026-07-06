@@ -37,6 +37,7 @@ export interface Vendor {
   headcount: number
   image_base64: string
   is_active: boolean
+  balance?: number
 }
 
 export interface Member {
@@ -46,6 +47,7 @@ export interface Member {
   phone: string
   image_base64: string
   want_order: boolean
+  balance?: number
 }
 
 export interface Order {
@@ -77,6 +79,15 @@ export interface OrderPayment {
   is_paid: boolean
 }
 
+export interface BalanceLog {
+  id?: number
+  target_type: 'vendor' | 'member'
+  target_id: number
+  amount: number
+  note: string
+  created_at: number
+}
+
 // ── Dexie 資料庫 ──────────────────────────────────────────────
 
 class BentoDatabase extends Dexie {
@@ -88,6 +99,7 @@ class BentoDatabase extends Dexie {
   orders!: EntityTable<Order, 'id'>
   order_items!: EntityTable<OrderItem, 'id'>
   order_payments!: EntityTable<OrderPayment, 'id'>
+  balance_logs!: EntityTable<BalanceLog, 'id'>
 
   constructor() {
     super('BentoDB')
@@ -106,6 +118,9 @@ class BentoDatabase extends Dexie {
     this.version(3).stores({
       stores:   '++id, name, is_active, type',
       toppings: '++id, store_id, name',
+    })
+    this.version(4).stores({
+      balance_logs: '++id, target_type, target_id',
     })
   }
 }

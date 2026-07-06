@@ -20,7 +20,13 @@ export const memberService = {
   update: (id: number, data: Partial<Omit<Member, 'id'>>) =>
     db.members.update(id, data),
 
-  remove: (id: number) => db.members.delete(id),
+  remove: async (id: number) => {
+    const member = await db.members.get(id)
+    if (member && (member.balance ?? 0) !== 0) {
+      throw new Error('人員尚有餘額，無法刪除')
+    }
+    await db.members.delete(id)
+  },
 
   toggleWantOrder: async (id: number) => {
     const member = await db.members.get(id)

@@ -7,6 +7,7 @@ const items = [
   { to: '/management/menus', icon: '🍱', label: '菜單管理' },
   { to: '/management/vendors', icon: '🏭', label: '廠商管理' },
   { to: '/management/members', icon: '👥', label: '人員管理' },
+  { to: '/management/wallet', icon: '💰', label: '錢包' },
   { to: '/order-management', icon: '🗑️', label: '訂單管理' },
 ]
 

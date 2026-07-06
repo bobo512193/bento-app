@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db, orderService } from '../../db'
+import { orderService } from '../../db'
 import PageHeader from '../../components/PageHeader'
 
 function formatDate(dateStr: string) {
@@ -13,9 +13,7 @@ export default function OrderManagementPage() {
   const [showConfirm, setShowConfirm] = useState(false)
   const [storageUsage, setStorageUsage] = useState('計算中...')
 
-  const orders = useLiveQuery(() =>
-    db.orders.orderBy('order_date').reverse().toArray()
-  )
+  const orders = useLiveQuery(() => orderService.getCompleted())
 
   const refreshStorage = () =>
     orderService.getStorageEstimate().then(setStorageUsage)

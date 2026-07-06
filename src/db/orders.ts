@@ -5,6 +5,12 @@ export const orderService = {
 
   getAll: () => db.orders.orderBy('order_date').reverse().toArray(),
 
+  getPending: () =>
+    db.orders.orderBy('order_date').reverse().filter(o => o.status === 'pending').toArray(),
+
+  getCompleted: () =>
+    db.orders.orderBy('order_date').reverse().filter(o => o.status === 'completed').toArray(),
+
   getByDate: (order_date: string) =>
     db.orders.where('order_date').equals(order_date).first(),
 
@@ -80,20 +86,82 @@ export const orderService = {
   },
 
   setMemberPayments: async (order_id: number, member_id: number | null, is_paid: boolean) => {
-    const all = await db.order_payments.where('order_id').equals(order_id).toArray()
+    const [allPayments, allItems, order] = await Promise.all([
+      db.order_payments.where('order_id').equals(order_id).toArray(),
+      db.order_items.where('order_id').equals(order_id).toArray(),
+      db.orders.get(order_id),
+    ])
+
+    const targetPayments = allPayments.filter(p => p.member_id === member_id)
+    const changingPayments = targetPayments.filter(p => p.is_paid !== is_paid)
+
+    for (const payment of changingPayments) {
+      const items = allItems.filter(i => i.vendor_id === payment.vendor_id && i.member_id === member_id)
+      const amount = items.reduce((a, i) => {
+        const toppingExtra = i.toppings?.reduce((s, t) => s + t.price, 0) ?? 0
+        return a + (i.unit_price + toppingExtra) * i.quantity
+      }, 0)
+      if (amount > 0) {
+        const delta = is_paid ? -amount : amount
+        const note = is_paid ? `訂單付款 ${order?.order_date ?? ''}` : `取消付款 ${order?.order_date ?? ''}`
+        if (member_id != null) {
+          const member = await db.members.get(member_id)
+          if (member) {
+            await db.members.update(member_id, { balance: (member.balance ?? 0) + delta })
+            await db.balance_logs.add({ target_type: 'member', target_id: member_id, amount: delta, note, created_at: Date.now() })
+          }
+        } else {
+          const vendor = await db.vendors.get(payment.vendor_id)
+          if (vendor) {
+            await db.vendors.update(payment.vendor_id, { balance: (vendor.balance ?? 0) + delta })
+            await db.balance_logs.add({ target_type: 'vendor', target_id: payment.vendor_id, amount: delta, note, created_at: Date.now() })
+          }
+        }
+      }
+    }
+
     await Promise.all(
-      all
-        .filter(p => p.member_id === member_id)
-        .map(p => db.order_payments.update(p.id!, { is_paid }))
+      targetPayments.map(p => db.order_payments.update(p.id!, { is_paid }))
     )
   },
 
   setVendorPayments: async (order_id: number, vendor_id: number, is_paid: boolean) => {
-    const all = await db.order_payments.where('order_id').equals(order_id).toArray()
+    const [allPayments, allItems, order] = await Promise.all([
+      db.order_payments.where('order_id').equals(order_id).toArray(),
+      db.order_items.where('order_id').equals(order_id).toArray(),
+      db.orders.get(order_id),
+    ])
+
+    const targetPayments = allPayments.filter(p => p.vendor_id === vendor_id)
+    const changingPayments = targetPayments.filter(p => p.is_paid !== is_paid)
+
+    for (const payment of changingPayments) {
+      const items = allItems.filter(i => i.vendor_id === vendor_id && i.member_id === payment.member_id)
+      const amount = items.reduce((a, i) => {
+        const toppingExtra = i.toppings?.reduce((s, t) => s + t.price, 0) ?? 0
+        return a + (i.unit_price + toppingExtra) * i.quantity
+      }, 0)
+      if (amount > 0) {
+        const delta = is_paid ? -amount : amount
+        const note = is_paid ? `訂單付款 ${order?.order_date ?? ''}` : `取消付款 ${order?.order_date ?? ''}`
+        if (payment.member_id != null) {
+          const member = await db.members.get(payment.member_id)
+          if (member) {
+            await db.members.update(payment.member_id, { balance: (member.balance ?? 0) + delta })
+            await db.balance_logs.add({ target_type: 'member', target_id: payment.member_id, amount: delta, note, created_at: Date.now() })
+          }
+        } else {
+          const vendor = await db.vendors.get(vendor_id)
+          if (vendor) {
+            await db.vendors.update(vendor_id, { balance: (vendor.balance ?? 0) + delta })
+            await db.balance_logs.add({ target_type: 'vendor', target_id: vendor_id, amount: delta, note, created_at: Date.now() })
+          }
+        }
+      }
+    }
+
     await Promise.all(
-      all
-        .filter(p => p.vendor_id === vendor_id)
-        .map(p => db.order_payments.update(p.id!, { is_paid }))
+      targetPayments.map(p => db.order_payments.update(p.id!, { is_paid }))
     )
   },
 

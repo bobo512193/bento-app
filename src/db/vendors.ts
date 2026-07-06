@@ -14,7 +14,10 @@ export const vendorService = {
     db.vendors.update(id, data),
 
   remove: async (id: number) => {
-    // 刪除廠商時，連同旗下人員一起刪除
+    const vendor = await db.vendors.get(id)
+    if (vendor && (vendor.balance ?? 0) !== 0) {
+      throw new Error('廠商尚有餘額，無法刪除')
+    }
     await db.members.where('vendor_id').equals(id).delete()
     await db.vendors.delete(id)
   },

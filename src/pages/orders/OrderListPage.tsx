@@ -14,7 +14,7 @@ export default function OrderListPage() {
 
   const data = useLiveQuery(async () => {
     const [orders, stores, menus, vendors, members] = await Promise.all([
-      orderService.getAll(),
+      orderService.getPending(),
       storeService.getAll(),
       menuService.getAll(),
       vendorService.getAll(),
