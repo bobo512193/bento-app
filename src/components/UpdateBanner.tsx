@@ -27,6 +27,14 @@ export default function UpdateBanner() {
 
   if (!needRefresh) return null
 
+  const handleUpdate = () => {
+    // 新 SW 真正接管頁面後才 reload，避免 plugin 內建 reload 時機不可靠
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      window.location.reload()
+    })
+    updateServiceWorker(false)
+  }
+
   return (
     <div className="fixed top-0 left-1/2 -translate-x-1/2 w-full max-w-lg z-50 bg-orange-500 text-white px-4 py-3 shadow-lg">
       <div className="flex items-center justify-between gap-3">
@@ -37,7 +45,7 @@ export default function UpdateBanner() {
           )}
         </div>
         <button
-          onClick={() => updateServiceWorker(true)}
+          onClick={handleUpdate}
           className="text-xs bg-white text-orange-500 font-semibold rounded-full px-3 py-1.5 shrink-0"
         >
           立即更新

@@ -161,6 +161,46 @@ balance_logs   → id, target_type('vendor'|'member'), target_id, amount, note, 
 
 ---
 
+## 已知問題與待實作
+
+### PWA 快取未清除導致執行舊程式碼
+
+**問題描述**
+
+使用者點選 **[現金]** 付款，結果錢包餘額被扣除；重啟 APP 後恢復正常。
+
+**根本原因**
+
+PWA 的 Service Worker（SW）會將所有 JS/CSS 快取在本機。目前設定為 `registerType: 'prompt'`：
+- 新版本部署後，瀏覽器在背景下載新 SW，但**不會立即啟用**
+- APP 畫面頂部出現「立即更新」banner，需使用者手動點擊才會切換到新 SW
+- 若使用者忽略 banner 或 APP 已在背景，**仍繼續執行舊版 JS**
+- 舊版付款邏輯（勾選已付即扣餘額）與新版（只有「錢包」才扣）不同，導致行為錯誤
+
+**根本原因（技術細節）**
+
+`updateServiceWorker(true)` 的內建 reload 時機不可靠：
+- 它先送訊息給等待中的 SW 執行 `skipWaiting()`
+- 然後立即呼叫 `window.location.reload()`
+- 但 reload 可能發生在新 SW **尚未真正接管頁面**之前，導致仍載入舊版快取
+
+**修正方式（已實作）**
+
+`UpdateBanner.tsx` 改為：先監聽 `controllerchange` 事件，確認新 SW 已接管後才 reload：
+
+```ts
+const handleUpdate = () => {
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    window.location.reload()
+  })
+  updateServiceWorker(false) // 不讓 plugin 自行 reload
+}
+```
+
+`controllerchange` 在新 SW 正式取得控制權時才觸發，此時 reload 必定載入新版程式碼。
+
+---
+
 ## 部署方式（GitHub Pages）
 
 ```
