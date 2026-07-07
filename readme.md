@@ -142,11 +142,12 @@ code --install-extension github.vscode-github-actions
 ```
 stores         → id, name, phone, address, image_base64, is_active, created_at
 menus          → id, store_id, name, price, image_base64, created_at
-vendors        → id, name, headcount, image_base64, is_active, created_at
-members        → id, vendor_id, name, phone, image_base64, want_order, created_at
+vendors        → id, name, headcount, image_base64, is_active, balance(nullable), created_at
+members        → id, vendor_id, name, phone, image_base64, want_order, balance(nullable), created_at
 orders         → id, order_date, status(pending|completed), completed_at(nullable), created_at
 order_items    → id, order_id, store_id, menu_id, vendor_id, member_id(nullable), quantity, unit_price
-order_payments → id, order_id, vendor_id, member_id(nullable), is_paid
+order_payments → id, order_id, vendor_id, member_id(nullable), is_paid, payment_method('cash'|'wallet'|null)
+balance_logs   → id, target_type('vendor'|'member'), target_id, amount, note, created_at
 ```
 
 **關聯說明**
@@ -197,14 +198,12 @@ order_payments → id, order_id, vendor_id, member_id(nullable), is_paid
 
 ---
 
-## 規劃功能：紀錄金額（餘額管理）
-
-> 尚未實作，以下為設計規格。
+## 功能：紀錄金額（餘額管理）✅ 已實作
 
 ### 概述
 
 每位**人員**或**廠商**（無人員時）可各自持有一個**可為負數的餘額帳戶**。  
-存錢 (+) / 提領 (-) 手動操作；訂單付款勾選時自動扣款，取消時自動退回。  
+存錢 (+) / 提領 (-) 手動操作；訂單付款選擇「錢包」時自動扣款，取消時自動退回；選擇「現金」則不影響餘額。  
 餘額資料獨立存於廠商或人員身上，刪除訂單不影響餘額。
 
 ---
@@ -231,21 +230,25 @@ order_payments → id, order_id, vendor_id, member_id(nullable), is_paid
 
 ---
 
-### 規則三：訂單列表 — 付款勾選連動餘額
+### 規則三：訂單列表 — 付款方式連動餘額
 
-勾選「已付」與取消的扣款對象，依廠商是否有綁定人員決定：
+付款時顯示兩個按鈕 **[現金]** 和 **[錢包]**，扣款對象依廠商是否有綁定人員決定：
 
 | 廠商狀態 | 扣款對象 |
 |----------|----------|
 | 廠商有綁定人員 | 對應的**人員**餘額 |
 | 廠商無綁定人員 | **廠商**本身的餘額 |
 
-**動作與方向：**
+**付款方式與餘額：**
 
 | 動作 | 金額變動 |
 |------|----------|
-| 勾選已付（未付 → 已付） | 餘額 **−** 該筆付款金額（扣款） |
-| 取消已付（已付 → 未付） | 餘額 **＋** 該筆付款金額（退回） |
+| 點選 **[現金]**（未付 → 現金已付） | 餘額**不變**（現金交易不影響錢包） |
+| 點選 **[錢包]**（未付 → 錢包已付） | 餘額 **−** 該筆付款金額（扣款） |
+| 再次點選同方式（已付 → 未付） | 若原為錢包則退回餘額；現金則無變動 |
+| 切換方式（現金 ↔ 錢包） | 依新方式重新計算（舊方式餘額效果先撤回） |
+
+訂單**完成後**付款方式以唯讀標籤顯示（現金／錢包／未付）。
 
 ---
 
@@ -302,26 +305,35 @@ balance_logs → id, target_type('vendor'|'member'), target_id, amount, note, cr
   └─ [提領 -]  → 彈出輸入金額 → 確認 → balance -= 金額
 ```
 
-#### 訂單付款勾選
+#### 訂單付款操作
 
 ```
-依人名 / 依廠商 → 勾選「已付」
+依人名 / 依廠商 → 點選 [現金]
+  → is_paid = true, payment_method = 'cash'
+  → 餘額不變
+
+依人名 / 依廠商 → 點選 [錢包]
+  → is_paid = true, payment_method = 'wallet'
   → 查找對應 balance 對象（人員 or 廠商）
   → balance -= 付款金額
   → 寫入 balance_logs（note: '訂單付款 YYYY-MM-DD'）
 
-取消勾選「已付」
-  → balance += 付款金額
+再次點選同方式（toggle off）→ is_paid = false, payment_method = null
+  → 若原為 wallet，balance += 付款金額
   → 寫入 balance_logs（note: '取消付款 YYYY-MM-DD'）
 ```
 
 ---
 
-### 實作時需同步調整的現有功能
+### 已同步完成的相關功能調整
 
-| # | 位置 | 調整說明 |
-|---|------|----------|
-| 1 | 訂單列表 | 只顯示**未完成**訂單（`status = 'pending'`），已完成訂單改至訂單管理頁查看 |
-| 2 | 廠商管理 / 人員管理 | 餘額顯示加上顏色：**正數（≥ 0）→ 綠色**、**負數（< 0）→ 紅色** |
-| 3 | 廠商管理 / 人員管理 | 餘額、存錢(+)、提領(-) 直接顯示在**列表卡片上**，不需點進明細頁才能操作 |
-| 4 | 管理頁面 | 新增**錢包**入口，點進去顯示所有廠商餘額 + 人員餘額的**合計總金額** |
+| # | 位置 | 說明 | 狀態 |
+|---|------|------|------|
+| 1 | 訂單列表 | 只顯示**未完成**訂單（`status = 'pending'`） | ✅ |
+| 2 | 廠商管理 / 人員管理 | 餘額正數綠色、負數紅色 | ✅ |
+| 3 | 廠商管理 / 人員管理 | 餘額、存錢(+)、提領(-) 直接顯示在列表卡片上 | ✅ |
+| 4 | 管理頁面 | 新增**錢包**入口，顯示所有廠商 + 人員餘額合計 | ✅ |
+| 5 | 訂單管理 | 只顯示**已完成**訂單，新增**明細**按鈕可展開查看訂單內容 | ✅ |
+| 6 | 廠商刪除 | 有餘額時無法刪除，提示錯誤 | ✅ |
+| 7 | 人員刪除 | 有餘額時無法刪除，提示錯誤 | ✅ |
+| 8 | 新增人員 | 廠商尚有餘額且無人員時，不可新增（需先提領） | ✅ |

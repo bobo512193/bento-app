@@ -77,6 +77,7 @@ export interface OrderPayment {
   vendor_id: number
   member_id: number | null
   is_paid: boolean
+  payment_method?: 'cash' | 'wallet' | null
 }
 
 export interface BalanceLog {

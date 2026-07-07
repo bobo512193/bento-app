@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { orderService } from '../../db'
+import { orderService, storeService, menuService, vendorService, memberService } from '../../db'
 import PageHeader from '../../components/PageHeader'
+import OrderDetail, { type Maps } from './OrderDetail'
 
 function formatDate(dateStr: string) {
   const [year, month, day] = dateStr.split('-')
@@ -12,8 +13,24 @@ export default function OrderManagementPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [showConfirm, setShowConfirm] = useState(false)
   const [storageUsage, setStorageUsage] = useState('計算中...')
+  const [expandedId, setExpandedId] = useState<number | null>(null)
 
   const orders = useLiveQuery(() => orderService.getCompleted())
+
+  const maps = useLiveQuery(async (): Promise<Maps | null> => {
+    const [stores, menus, vendors, members] = await Promise.all([
+      storeService.getAll(),
+      menuService.getAll(),
+      vendorService.getAll(),
+      memberService.getAll(),
+    ])
+    return {
+      store:  Object.fromEntries(stores.map(s => [s.id!, s])),
+      menu:   Object.fromEntries(menus.map(m =>  [m.id!, m])),
+      vendor: Object.fromEntries(vendors.map(v => [v.id!, v])),
+      member: Object.fromEntries(members.map(m => [m.id!, m])),
+    }
+  })
 
   const refreshStorage = () =>
     orderService.getStorageEstimate().then(setStorageUsage)
@@ -80,27 +97,31 @@ export default function OrderManagementPage() {
       {/* 日期清單 */}
       <div className="p-4 space-y-2 pb-36">
         {orders?.map(order => (
-          <label
-            key={order.order_date}
-            className="flex items-center gap-3 bg-white rounded-xl px-4 py-3.5 border border-gray-100 cursor-pointer active:bg-gray-50"
-          >
-            <input
-              type="checkbox"
-              checked={selected.has(order.order_date)}
-              onChange={() => toggleDate(order.order_date)}
-              className="w-5 h-5 accent-orange-500 shrink-0"
-            />
-            <span className="flex-1 text-sm text-gray-800">
-              {formatDate(order.order_date)}
-            </span>
-            <span className={`text-xs px-2 py-0.5 rounded-full shrink-0 ${
-              order.status === 'completed'
-                ? 'bg-green-100 text-green-700'
-                : 'bg-orange-100 text-orange-600'
-            }`}>
-              {order.status === 'completed' ? '已完成' : '未完成'}
-            </span>
-          </label>
+          <div key={order.order_date} className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+            <div className="flex items-center gap-3 px-4 py-3.5">
+              <input
+                type="checkbox"
+                checked={selected.has(order.order_date)}
+                onChange={() => toggleDate(order.order_date)}
+                className="w-5 h-5 accent-orange-500 shrink-0"
+              />
+              <span className="flex-1 text-sm text-gray-800">
+                {formatDate(order.order_date)}
+              </span>
+              <span className="text-xs px-2 py-0.5 rounded-full shrink-0 bg-green-100 text-green-700">
+                已完成
+              </span>
+              <button
+                onClick={() => setExpandedId(expandedId === order.id ? null : order.id!)}
+                className="text-xs text-orange-500 border border-orange-200 rounded-full px-2.5 py-1 shrink-0"
+              >
+                {expandedId === order.id ? '收起' : '明細'}
+              </button>
+            </div>
+            {expandedId === order.id && maps && (
+              <OrderDetail order={order} maps={maps} />
+            )}
+          </div>
         ))}
 
         {orders?.length === 0 && (

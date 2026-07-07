@@ -393,7 +393,7 @@ export default function OrderDetail({ order, maps }: Props) {
             <span className="text-xs text-gray-300">請先新增訂單品項</span>
           ) : (
             <span className="text-xs text-orange-300">
-              尚有 {payments.filter(p => !p.is_paid).length} 筆未付（請至依人名勾選）
+              尚有 {payments.filter(p => !p.is_paid).length} 筆未付
             </span>
           )}
 
@@ -521,25 +521,41 @@ export default function OrderDetail({ order, maps }: Props) {
           {activeTab === 'vendor' && (
             <div className="p-4 space-y-3">
               {vendorView.map(sec => {
-                const vendorAllPaid = sec.vendorPayments.length > 0 && sec.vendorPayments.every(p => p.is_paid)
+                const vendorAllCash   = sec.vendorPayments.length > 0 && sec.vendorPayments.every(p => p.is_paid && p.payment_method === 'cash')
+                const vendorAllWallet = sec.vendorPayments.length > 0 && sec.vendorPayments.every(p => p.is_paid && p.payment_method === 'wallet')
+                const vendorAnyPaid   = sec.vendorPayments.some(p => p.is_paid)
                 return (
                 <div key={sec.vendorId} className="bg-white rounded-xl border border-gray-100 overflow-hidden">
                   <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-100">
                     <span className="text-sm font-semibold text-gray-700">{sec.vendorName}</span>
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-semibold text-orange-500">NT$ {sec.vendorTotal}</span>
-                      {!isCompleted && sec.vendorPayments.length > 0 && (
-                        <label className="flex items-center gap-1.5 cursor-pointer">
-                          <span className={`text-xs ${vendorAllPaid ? 'text-green-600 font-medium' : 'text-gray-400'}`}>
-                            {vendorAllPaid ? '已付' : '未付'}
+                      {sec.vendorPayments.length > 0 && (
+                        isCompleted ? (
+                          <span className={`text-xs px-2 py-0.5 rounded-full ${
+                            vendorAllCash   ? 'bg-green-100 text-green-600' :
+                            vendorAllWallet ? 'bg-blue-100 text-blue-500' :
+                            vendorAnyPaid   ? 'bg-yellow-100 text-yellow-600' :
+                            'bg-gray-100 text-gray-400'
+                          }`}>
+                            {vendorAllCash ? '現金' : vendorAllWallet ? '錢包' : vendorAnyPaid ? '部分付' : '未付'}
                           </span>
-                          <input
-                            type="checkbox"
-                            checked={vendorAllPaid}
-                            onChange={() => orderService.setVendorPayments(order.id!, sec.vendorId, !vendorAllPaid)}
-                            className="w-5 h-5 accent-orange-500"
-                          />
-                        </label>
+                        ) : (
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => orderService.setVendorPayments(order.id!, sec.vendorId, vendorAllCash ? null : 'cash')}
+                              className={`text-xs px-2 py-1 rounded-full border transition-colors ${vendorAllCash ? 'bg-green-500 text-white border-green-500' : 'text-gray-400 border-gray-200'}`}
+                            >
+                              現金
+                            </button>
+                            <button
+                              onClick={() => orderService.setVendorPayments(order.id!, sec.vendorId, vendorAllWallet ? null : 'wallet')}
+                              className={`text-xs px-2 py-1 rounded-full border transition-colors ${vendorAllWallet ? 'bg-blue-500 text-white border-blue-500' : 'text-gray-400 border-gray-200'}`}
+                            >
+                              錢包
+                            </button>
+                          </div>
+                        )
                       )}
                     </div>
                   </div>
@@ -576,30 +592,48 @@ export default function OrderDetail({ order, maps }: Props) {
           {activeTab === 'person' && (
             <div className="p-4 space-y-3">
               {personView.map(sec => {
-                const memberAllPaid = sec.memberPayments.length > 0 && sec.memberPayments.every(p => p.is_paid)
+                const memberAllCash   = sec.memberPayments.length > 0 && sec.memberPayments.every(p => p.is_paid && p.payment_method === 'cash')
+                const memberAllWallet = sec.memberPayments.length > 0 && sec.memberPayments.every(p => p.is_paid && p.payment_method === 'wallet')
+                const memberAnyPaid   = sec.memberPayments.some(p => p.is_paid)
                 return (
                   <div key={sec.sectionKey} className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-                    {/* 人員標題 + 付款 toggle */}
+                    {/* 人員標題 + 付款 */}
                     <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-100">
                       <span className="text-sm font-semibold text-gray-700">{sec.memberName}</span>
                       <div className="flex items-center gap-2">
                         <span className="text-sm font-semibold text-orange-500">NT$ {sec.memberTotal}</span>
                         {sec.memberPayments.length > 0 && (
-                          <label className="flex items-center gap-1.5 cursor-pointer">
-                            <span className={`text-xs ${memberAllPaid ? 'text-green-600 font-medium' : 'text-gray-400'}`}>
-                              {memberAllPaid ? '已付' : '未付'}
+                          isCompleted ? (
+                            <span className={`text-xs px-2 py-0.5 rounded-full ${
+                              memberAllCash   ? 'bg-green-100 text-green-600' :
+                              memberAllWallet ? 'bg-blue-100 text-blue-500' :
+                              memberAnyPaid   ? 'bg-yellow-100 text-yellow-600' :
+                              'bg-gray-100 text-gray-400'
+                            }`}>
+                              {memberAllCash ? '現金' : memberAllWallet ? '錢包' : memberAnyPaid ? '部分付' : '未付'}
                             </span>
-                            <input
-                              type="checkbox"
-                              checked={memberAllPaid}
-                              disabled={isCompleted}
-                              onChange={() => sec.memberId != null
-                                ? orderService.setMemberPayments(order.id!, sec.memberId, !memberAllPaid)
-                                : orderService.setVendorPayments(order.id!, sec.vendorId!, !memberAllPaid)
-                              }
-                              className="w-5 h-5 accent-orange-500"
-                            />
-                          </label>
+                          ) : (
+                            <div className="flex items-center gap-1">
+                              <button
+                                onClick={() => sec.memberId != null
+                                  ? orderService.setMemberPayments(order.id!, sec.memberId, memberAllCash ? null : 'cash')
+                                  : orderService.setVendorPayments(order.id!, sec.vendorId!, memberAllCash ? null : 'cash')
+                                }
+                                className={`text-xs px-2 py-1 rounded-full border transition-colors ${memberAllCash ? 'bg-green-500 text-white border-green-500' : 'text-gray-400 border-gray-200'}`}
+                              >
+                                現金
+                              </button>
+                              <button
+                                onClick={() => sec.memberId != null
+                                  ? orderService.setMemberPayments(order.id!, sec.memberId, memberAllWallet ? null : 'wallet')
+                                  : orderService.setVendorPayments(order.id!, sec.vendorId!, memberAllWallet ? null : 'wallet')
+                                }
+                                className={`text-xs px-2 py-1 rounded-full border transition-colors ${memberAllWallet ? 'bg-blue-500 text-white border-blue-500' : 'text-gray-400 border-gray-200'}`}
+                              >
+                                錢包
+                              </button>
+                            </div>
+                          )
                         )}
                       </div>
                     </div>
