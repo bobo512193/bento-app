@@ -16,4 +16,12 @@ export const balanceService = {
     await table.update(target_id, { balance: (record.balance ?? 0) - amount })
     await db.balance_logs.add({ target_type, target_id, amount: -amount, note: '提領', created_at: Date.now() })
   },
+
+  clearOldLogs: async (): Promise<number> => {
+    const cutoff = Date.now() - 60 * 24 * 60 * 60 * 1000
+    const old = await db.balance_logs.filter(l => l.created_at < cutoff).toArray()
+    if (old.length === 0) return 0
+    await db.balance_logs.bulkDelete(old.map(l => l.id!))
+    return old.length
+  },
 }

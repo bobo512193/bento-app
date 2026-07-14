@@ -15,6 +15,7 @@ import MemberListPage from './pages/members/MemberListPage'
 import MemberFormPage from './pages/members/MemberFormPage'
 import OrderManagementPage from './pages/orders/OrderManagementPage'
 import WalletPage from './pages/management/WalletPage'
+import WalletLogPage from './pages/management/WalletLogPage'
 
 function App() {
   return (
@@ -57,6 +58,7 @@ function App() {
 
           {/* 錢包 */}
           <Route path="management/wallet" element={<WalletPage />} />
+          <Route path="management/wallet/:type/:id" element={<WalletLogPage />} />
 
           {/* 訂單管理（清除） */}
           <Route path="order-management" element={<OrderManagementPage />} />
