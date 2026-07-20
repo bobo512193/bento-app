@@ -206,14 +206,14 @@ export default function CreateOrderPage() {
           if (itemState.qty === 0) continue
           await orderService.addItem(buildItem(Number(menuIdStr), itemState, member.id!))
         }
-        await orderService.addPayment({ order_id: orderId, vendor_id: vendor!.id!, member_id: member.id!, is_paid: false })
+        await orderService.ensurePayment({ order_id: orderId, vendor_id: vendor!.id!, member_id: member.id!, is_paid: false })
       }
     } else {
       for (const [menuIdStr, itemState] of Object.entries(vendorOrders)) {
         if (itemState.qty === 0) continue
         await orderService.addItem(buildItem(Number(menuIdStr), itemState, null))
       }
-      await orderService.addPayment({ order_id: orderId, vendor_id: vendor!.id!, member_id: null, is_paid: false })
+      await orderService.ensurePayment({ order_id: orderId, vendor_id: vendor!.id!, member_id: null, is_paid: false })
     }
 
     navigate('/orders', { replace: true })

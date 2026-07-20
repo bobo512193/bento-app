@@ -80,6 +80,17 @@ export const orderService = {
   addPayment: (payment: Omit<OrderPayment, 'id'>) =>
     db.order_payments.add(payment),
 
+  // 只在不存在時才新增，防止重複建立同一 (order, vendor, member) 的 payment
+  ensurePayment: async (payment: Omit<OrderPayment, 'id'>) => {
+    const existing = await db.order_payments
+      .where('order_id').equals(payment.order_id)
+      .filter(p => p.vendor_id === payment.vendor_id && p.member_id === payment.member_id)
+      .first()
+    if (!existing) {
+      await db.order_payments.add(payment)
+    }
+  },
+
   togglePayment: async (id: number) => {
     const p = await db.order_payments.get(id)
     if (p) await db.order_payments.update(id, { is_paid: !p.is_paid })
@@ -94,10 +105,14 @@ export const orderService = {
 
     const targetPayments = allPayments.filter(p => p.member_id === member_id)
 
+    // 去重：同一 (vendor_id, member_id) 只計算一次餘額，防止重複 payment record 造成雙扣
+    const processedVendors = new Set<number>()
     for (const payment of targetPayments) {
       const wasWallet = payment.is_paid && payment.payment_method === 'wallet'
       const isNowWallet = method === 'wallet'
       if (wasWallet === isNowWallet) continue
+      if (processedVendors.has(payment.vendor_id)) continue
+      processedVendors.add(payment.vendor_id)
 
       const items = allItems.filter(i => i.vendor_id === payment.vendor_id && i.member_id === member_id)
       const amount = items.reduce((a, i) => {
@@ -138,10 +153,15 @@ export const orderService = {
 
     const targetPayments = allPayments.filter(p => p.vendor_id === vendor_id)
 
+    // 去重：同一 (vendor_id, member_id) 只計算一次餘額，防止重複 payment record 造成雙扣
+    const processedMemberKeys = new Set<string>()
     for (const payment of targetPayments) {
       const wasWallet = payment.is_paid && payment.payment_method === 'wallet'
       const isNowWallet = method === 'wallet'
       if (wasWallet === isNowWallet) continue
+      const memberKey = String(payment.member_id)
+      if (processedMemberKeys.has(memberKey)) continue
+      processedMemberKeys.add(memberKey)
 
       const items = allItems.filter(i => i.vendor_id === vendor_id && i.member_id === payment.member_id)
       const amount = items.reduce((a, i) => {
