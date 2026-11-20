@@ -3,7 +3,6 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { vendorService } from '../../db'
 import PageHeader from '../../components/PageHeader'
 import ImagePicker from '../../components/ImagePicker'
-import Toggle from '../../components/Toggle'
 
 export default function VendorFormPage() {
   const { id } = useParams()
@@ -13,7 +12,6 @@ export default function VendorFormPage() {
   const [name, setName] = useState('')
   const [headcount, setHeadcount] = useState('')
   const [image_base64, setImage] = useState('')
-  const [is_active, setActive] = useState(true)
   const [showConfirmDelete, setShowConfirmDelete] = useState(false)
   const [nameError, setNameError] = useState(false)
 
@@ -24,7 +22,6 @@ export default function VendorFormPage() {
       setName(vendor.name)
       setHeadcount(String(vendor.headcount))
       setImage(vendor.image_base64)
-      setActive(vendor.is_active)
     })
   }, [id, isEdit])
 
@@ -34,12 +31,11 @@ export default function VendorFormPage() {
       name: name.trim(),
       headcount: Number(headcount) || 0,
       image_base64,
-      is_active,
     }
     if (isEdit) {
       await vendorService.update(Number(id), data)
     } else {
-      await vendorService.add(data)
+      await vendorService.add({ ...data, is_active: true })
     }
     navigate(-1)
   }
@@ -91,11 +87,6 @@ export default function VendorFormPage() {
             className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:border-orange-400"
           />
           <p className="text-xs text-gray-400 mt-1">訂單建立時作為參考人數</p>
-        </div>
-
-        <div className="flex items-center justify-between py-3 border-t border-gray-100">
-          <span className="text-sm text-gray-700">啟用狀態</span>
-          <Toggle value={is_active} onChange={setActive} />
         </div>
 
         {isEdit && (

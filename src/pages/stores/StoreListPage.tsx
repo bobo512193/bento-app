@@ -2,6 +2,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { Link } from 'react-router-dom'
 import { storeService } from '../../db'
 import PageHeader from '../../components/PageHeader'
+import Toggle from '../../components/Toggle'
 
 export default function StoreListPage() {
   const stores = useLiveQuery(() => storeService.getAll())
@@ -42,11 +43,10 @@ export default function StoreListPage() {
                 }`}>
                   {isDrink ? '飲料' : '便當'}
                 </span>
-                <span className={`text-xs px-2 py-0.5 rounded-full ${
-                  store.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-400'
-                }`}>
+                <span className={`text-xs ${store.is_active ? 'text-green-600' : 'text-gray-400'}`}>
                   {store.is_active ? '啟用' : '停用'}
                 </span>
+                <Toggle value={store.is_active} onChange={() => storeService.toggleActive(store.id!)} />
                 <Link to={`/management/stores/${store.id}/edit`} className="text-gray-300 text-xl leading-none">›</Link>
               </div>
             </div>

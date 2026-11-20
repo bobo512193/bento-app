@@ -3,7 +3,6 @@ import { useNavigate, useParams, Link } from 'react-router-dom'
 import { storeService } from '../../db'
 import PageHeader from '../../components/PageHeader'
 import ImagePicker from '../../components/ImagePicker'
-import Toggle from '../../components/Toggle'
 
 export default function StoreFormPage() {
   const { id } = useParams()
@@ -14,7 +13,6 @@ export default function StoreFormPage() {
   const [phone,        setPhone]   = useState('')
   const [address,      setAddress] = useState('')
   const [image_base64, setImage]   = useState('')
-  const [is_active,    setActive]  = useState(true)
   const [type,         setType]    = useState<'bento' | 'drink'>('bento')
   const [showConfirmDelete, setShowConfirmDelete] = useState(false)
   const [nameError, setNameError] = useState(false)
@@ -27,18 +25,17 @@ export default function StoreFormPage() {
       setPhone(store.phone)
       setAddress(store.address)
       setImage(store.image_base64)
-      setActive(store.is_active)
       setType(store.type ?? 'bento')
     })
   }, [id, isEdit])
 
   const handleSave = async () => {
     if (!name.trim()) { setNameError(true); return }
-    const data = { name: name.trim(), phone, address, image_base64, is_active, type }
+    const data = { name: name.trim(), phone, address, image_base64, type }
     if (isEdit) {
       await storeService.update(Number(id), data)
     } else {
-      await storeService.add(data)
+      await storeService.add({ ...data, is_active: true })
     }
     navigate(-1)
   }
@@ -121,11 +118,6 @@ export default function StoreFormPage() {
             placeholder="輸入地址"
             className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:border-orange-400"
           />
-        </div>
-
-        <div className="flex items-center justify-between py-3 border-t border-gray-100">
-          <span className="text-sm text-gray-700">啟用狀態</span>
-          <Toggle value={is_active} onChange={setActive} />
         </div>
 
         {/* 管理加料入口 */}

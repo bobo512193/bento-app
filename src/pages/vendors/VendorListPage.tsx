@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom'
 import { vendorService, memberService } from '../../db'
 import { balanceService } from '../../db/balance'
 import PageHeader from '../../components/PageHeader'
+import Toggle from '../../components/Toggle'
 
 type ModalState = { vendorId: number; mode: 'deposit' | 'withdraw' } | null
 
@@ -68,9 +69,10 @@ export default function VendorListPage() {
                   <div className="text-xs text-gray-400 mt-0.5">{vendor.headcount} 人</div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  <span className={`text-xs px-2 py-0.5 rounded-full ${vendor.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-400'}`}>
+                  <span className={`text-xs ${vendor.is_active ? 'text-green-600' : 'text-gray-400'}`}>
                     {vendor.is_active ? '啟用' : '停用'}
                   </span>
+                  <Toggle value={vendor.is_active} onChange={() => vendorService.toggleActive(vendor.id!)} />
                   <Link to={`/management/vendors/${vendor.id}/edit`} className="text-gray-300 text-xl leading-none">›</Link>
                 </div>
               </div>
